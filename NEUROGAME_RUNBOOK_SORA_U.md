@@ -212,5 +212,91 @@ python3 neurogame_poc.py --seed 42 --episodes 10000
 
 ---
 
-*"Tabula non-rasa — și paradoxal, tocmai de aceea mai flexibil."*  
+*"Tabula non-rasa — și paradoxul, tocmai de aceea mai flexibil."*  
 — Nova (Claude Sonnet 4.6), 7 Martie 2026
+
+---
+
+## 7. Unity Build — Rulare pe Ubuntu (headless)
+
+Cezar lucrează cu Unity 6 pe macOS (vizual, prefab-uri, scenă).  
+Sora-U rulează **build-ul Linux headless** pentru training fără GPU grafic.
+
+### 7.1 Primești build-ul de la SoraM
+
+SoraM face build din Unity Editor → `File → Build Settings`:
+- Platform: `Linux (x86_64)`
+- ☑ `Server Build` (headless, fără fereastră)
+- Output: `builds/NeuroGame-Linux/`
+- Push pe GitHub → tu faci pull
+
+```bash
+cd ~/NeuroGame
+git pull origin main
+ls builds/NeuroGame-Linux/
+# NeuroGame-Linux.x86_64  +  NeuroGame-Linux_Data/
+```
+
+### 7.2 Permisiuni + rulare
+
+```bash
+chmod +x builds/NeuroGame-Linux/NeuroGame-Linux.x86_64
+
+# Rulare headless (fără display)
+./builds/NeuroGame-Linux/NeuroGame-Linux.x86_64 \
+  -batchmode -nographics \
+  -logFile logs/unity_run.log \
+  -episodes 50000 \
+  -seed 42
+```
+
+### 7.3 Dependențe Ubuntu pentru Unity Linux build
+
+```bash
+sudo apt-get install -y \
+  libglu1-mesa \
+  libxcursor1 \
+  libxrandr2 \
+  libxi6 \
+  libxinerama1 \
+  libxss1 \
+  libasound2 \
+  libpulse0
+```
+
+### 7.4 Verificare că Unity vede CUDA (pentru extensii viitoare ML-Agents)
+
+```bash
+# Dacă adăugăm ML-Agents mai târziu:
+pip install mlagents
+# Unity folosește CUDA prin PyTorch backend al ML-Agents
+python3 -c "import torch; print('CUDA:', torch.cuda.is_available())"
+```
+
+### 7.5 Diferența față de Pygame POC
+
+| Aspect | Pygame POC | Unity Build |
+|--------|-----------|-------------|
+| Scop | Rapid prototyping, experimente | Demo vizual, extensibilitate |
+| Headless | `--mode headless` | `-batchmode -nographics` |
+| Training | Complet (Q-table în Python) | Scripturi C# (același algoritm) |
+| Grafica | Minimală | Completă (prefab-uri Cezar) |
+| Extensibil | Python pur | C# + Unity Physics |
+
+**Recomandare**: Folosești Pygame POC pentru experimentele A/B/C/D. Unity pentru demo și când adăugăm physics complexă (ragdoll, fluid dynamics, obstacole 3D).
+
+---
+
+## 8. Sync SoraM ↔ Sora-U
+
+```bash
+# Înainte de orice training:
+git pull origin main
+
+# Rezultatele tale — push la finalul sesiunii:
+git add logs/ reports/ checkpoints/
+git commit -m "Training results: exp_C 50k episoade, reward +23%"
+git push origin main
+```
+
+SoraM le vede instant pe macOS și le integrează în arhitectură.
