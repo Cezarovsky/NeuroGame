@@ -1,53 +1,56 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
-using System.Collections.Generic;
 
 /// <summary>
-/// Manager principal: spawn obiecte, reward, episoade, UI stats.
-/// Singleton — accesibil din orice script via NeuroGameManager.Instance
+/// Manager adversarial: lup vs. iepure.
+/// Reward-urile sunt OPUSE — suma lor e zero (zero-sum game).
+/// Lup câștigă exact cât pierde iepurele.
 /// </summary>
 public class NeuroGameManager : MonoBehaviour
 {
     public static NeuroGameManager Instance { get; private set; }
 
-    [Header("Prefabs")]
-    public GameObject agentPrefab;
-    public GameObject neutralObjectPrefab;
-    public GameObject dangerousObjectPrefab;
-    public GameObject pursuerPrefab;
+    [Header("Prefabs agenți")]
+    public GameObject preyPrefab;       // iepure — alb/gri
+    public GameObject predatorPrefab;   // lup — roșu
 
-    [Header("Configurare scenă")]
-    public int neutralCount = 5;
-    public int dangerousCount = 3;
-    public int pursuerCount = 1;
+    [Header("Configurare teren")]
+    [Tooltip("Teren plat, fără obstacole — prima fază")]
+    public float arenaSize = 8f;
 
     [Header("Episoade")]
     public float episodeTimeLimit = 30f;
     public int maxEpisodes = 10000;
 
-    [Header("Reward")]
-    public float rewardSurvival = 0.1f;      // fiecare secundă supraviețuită
-    public float penaltyHit = -10f;
+    [Header("Reward — Iepure")]
+    public float preyRewardSurvival = 0.1f;
+    public float preyPenaltyCapture = -20f;
+
+    [Header("Reward — Lup (opus iepurelui)")]
+    public float predatorRewardCapture = 20f;
+    public float predatorPenaltyTime = -0.05f;
+
+    [Header("Spawn")]
+    public float minSpawnDistance = 5f;
 
     [Header("UI")]
     public Text episodeText;
-    public Text rewardText;
+    public Text preyRewardText;
+    public Text predatorRewardText;
     public Text epsilonText;
-    public Text qTableText;
 
-    private GameObject _agentGO;
-    private QLearningAgent _agent;
-    private KantianSensor _kantian;
-    private List<GameObject> _spawnedObjects = new();
+    private GameObject _preyGO;
+    private GameObject _predatorGO;
+    private NeuroAgent _prey;
+    private NeuroAgent _predator;
 
     private int _episodeCount = 0;
     private float _episodeTimer = 0f;
     private bool _episodeActive = false;
-    private bool _agentHit = false;
-
-    // Bounds din Camera
-    private float _xMin, _xMax, _yMin, _yMax;
+    private bool _captured = false;
+    private int _captureCount = 0;
+    private int _escapeCount = 0;
 
     void Awake()
     {
@@ -55,18 +58,7 @@ public class NeuroGameManager : MonoBehaviour
         Instance = this;
     }
 
-    void Start()
-    {
-        Camera cam = Camera.main;
-        float camH = cam.orthographicSize;
-        float camW = camH * cam.aspect;
-        _xMin = -camW + 0.5f;
-        _xMax = camW - 0.5f;
-        _yMin = -camH + 0.5f;
-        _yMax = camH - 0.5f;
-
-        StartEpisode();
-    }
+    void Start() => StartEpisode();
 
     void Update()
     {
@@ -74,112 +66,118 @@ public class NeuroGameManager : MonoBehaviour
 
         _episodeTimer += Time.deltaTime;
 
-        // Reward de supraviețuire per frame
-        if (_agent != null)
-        {
-            string nextState = GetAgentStateKey();
-            _agent.ReceiveReward(rewardSurvival * Time.deltaTime, nextState);
-        }
+        _prey?.ReceiveReward(preyRewardSurvival * Time.deltaTime, GetStateKey(_prey));
+        _predator?.ReceiveReward(predatorPenaltyTime * Time.deltaTime, GetStateKey(_predator));
 
-        // Condiții de terminare episod
-        if (_agentHit || _episodeTimer >= episodeTimeLimit)
+        if (_captured || _episodeTimer >= episodeTimeLimit)
             EndEpisode();
 
         UpdateUI();
-    }
-
-    string GetAgentStateKey()
-    {
-        if (_agent == null) return "0,0,0,0";
-        Camera cam = Camera.main;
-        Vector3 vp = cam.WorldToViewportPoint(_agentGO.transform.position);
-        int gx = Mathf.Clamp(Mathf.FloorToInt(vp.x * 10), 0, 9);
-        int gy = Mathf.Clamp(Mathf.FloorToInt(vp.y * 10), 0, 9);
-        float loom = _kantian != null ? _kantian.CurrentLoomingIndex : 0f;
-        int lb = loom < 0.02f ? 0 : loom < 0.05f ? 1 : loom < 0.1f ? 2 : 3;
-        return $"{gx},{gy},{lb},0";
     }
 
     void StartEpisode()
     {
         _episodeCount++;
         _episodeTimer = 0f;
-        _agentHit = false;
+        _captured = false;
         _episodeActive = true;
 
-        // Curățăm scena precedentă
-        foreach (var go in _spawnedObjects) if (go) Destroy(go);
-        _spawnedObjects.Clear();
-        if (_agentGO) Destroy(_agentGO);
+        if (_preyGO) Destroy(_preyGO);
+        if (_predatorGO) Destroy(_predatorGO);
 
-        // Spawn agent în centru
-        _agentGO = Instantiate(agentPrefab, Vector3.zero, Quaternion.identity);
-        _agent = _agentGO.GetComponent<QLearningAgent>();
-        _kantian = _agentGO.GetComponent<KantianSensor>();
-        _agent?.ResetEpisode();
+        Vector2 preyPos = RandomPosition();
+        Vector2 predPos;
+        int attempts = 0;
+        do { predPos = RandomPosition(); attempts++; }
+        while (Vector2.Distance(preyPos, predPos) < minSpawnDistance && attempts < 50);
 
-        // Spawn obiecte
-        SpawnObjects(neutralObjectPrefab, neutralCount, false, false);
-        SpawnObjects(dangerousObjectPrefab, dangerousCount, true, false);
-        SpawnObjects(pursuerPrefab, pursuerCount, true, true);
-    }
+        _preyGO = Instantiate(preyPrefab, preyPos, Quaternion.identity);
+        _predatorGO = Instantiate(predatorPrefab, predPos, Quaternion.identity);
 
-    void SpawnObjects(GameObject prefab, int count, bool dangerous, bool pursuer)
-    {
-        for (int i = 0; i < count; i++)
-        {
-            // Spawn la margini, nu pe agent
-            Vector2 pos = RandomBorderPosition();
-            GameObject go = Instantiate(prefab, pos, Quaternion.identity);
-            WorldObject wo = go.GetComponent<WorldObject>();
-            if (wo != null)
-            {
-                wo.isDangerous = dangerous;
-                wo.isPursuer = pursuer;
-                if (pursuer) wo.SetTarget(_agentGO.transform);
-            }
-            _spawnedObjects.Add(go);
-        }
-    }
+        _prey = _preyGO.GetComponent<NeuroAgent>();
+        _predator = _predatorGO.GetComponent<NeuroAgent>();
 
-    Vector2 RandomBorderPosition()
-    {
-        // Poziție aleatorie pe una din cele 4 margini
-        int edge = Random.Range(0, 4);
-        return edge switch
-        {
-            0 => new Vector2(Random.Range(_xMin, _xMax), _yMax),   // sus
-            1 => new Vector2(Random.Range(_xMin, _xMax), _yMin),   // jos
-            2 => new Vector2(_xMin, Random.Range(_yMin, _yMax)),   // stânga
-            _ => new Vector2(_xMax, Random.Range(_yMin, _yMax))    // dreapta
-        };
+        _prey.role = AgentRole.Prey;
+        _prey.agentId = "prey";
+        _prey.SetOpponent(_predator);
+
+        _predator.role = AgentRole.Predator;
+        _predator.agentId = "predator";
+        _predator.SetOpponent(_prey);
+
+        _prey.ResetEpisode();
+        _predator.ResetEpisode();
+
+        NeuromorphicEventBus.Instance?.OnEpisodeStart(_episodeCount);
     }
 
     void EndEpisode()
     {
         _episodeActive = false;
 
+        if (_captured) _captureCount++;
+        else _escapeCount++;
+
+        NeuromorphicEventBus.Instance?.OnEpisodeEnd(new EpisodeSummary
+        {
+            episode = _episodeCount,
+            captured = _captured,
+            duration = _episodeTimer,
+            preyReward = _prey?.EpisodeReward ?? 0f,
+            predatorReward = _predator?.EpisodeReward ?? 0f,
+            preyLoomingPeak = _prey?.CurrentLoomingIndex ?? 0f,
+            predatorLoomingPeak = _predator?.CurrentLoomingIndex ?? 0f,
+            captureRate = _captureCount / (float)_episodeCount,
+            escapeRate = _escapeCount / (float)_episodeCount
+        });
+
         if (_episodeCount < maxEpisodes)
             StartEpisode();
-        else
-            Debug.Log($"Training complet după {maxEpisodes} episoade.");
     }
 
-    public void OnAgentHit(bool isDangerous)
+    public void OnCapture()
     {
         if (!_episodeActive) return;
-        if (isDangerous)
-        {
-            _agent?.ReceiveReward(penaltyHit, "0,0,0,0");
-            _agentHit = true;
-        }
+        _prey?.ReceiveReward(preyPenaltyCapture, "terminal");
+        _predator?.ReceiveReward(predatorRewardCapture, "terminal");
+        _captured = true;
+    }
+
+    Vector2 RandomPosition()
+    {
+        float h = arenaSize / 2f;
+        return new Vector2(Random.Range(-h, h), Random.Range(-h, h));
+    }
+
+    string GetStateKey(NeuroAgent agent)
+    {
+        if (agent == null) return "0,0,0,0";
+        Camera cam = Camera.main;
+        Vector3 vp = cam.WorldToViewportPoint(agent.transform.position);
+        int gx = Mathf.Clamp(Mathf.FloorToInt(vp.x * 10), 0, 9);
+        int gy = Mathf.Clamp(Mathf.FloorToInt(vp.y * 10), 0, 9);
+        return $"{gx},{gy},0,0";
     }
 
     void UpdateUI()
     {
-        if (episodeText) episodeText.text = $"Episod: {_episodeCount}";
-        if (rewardText) rewardText.text = $"Reward: {_agent?.EpisodeReward:F1}";
-        if (epsilonText) epsilonText.text = $"ε: {_agent?.Epsilon:F3}";
-        if (qTableText) qTableText.text = $"Q-states: {_agent?.QTableSize}";
+        if (episodeText) episodeText.text = $"Ep: {_episodeCount}/{maxEpisodes}";
+        if (preyRewardText) preyRewardText.text = $"Iepure: {_prey?.EpisodeReward:F1}";
+        if (predatorRewardText) predatorRewardText.text = $"Lup: {_predator?.EpisodeReward:F1}";
+        if (epsilonText) epsilonText.text = $"ε prey:{_prey?.Epsilon:F3} lup:{_predator?.Epsilon:F3}";
     }
+}
+
+[System.Serializable]
+public struct EpisodeSummary
+{
+    public int episode;
+    public bool captured;
+    public float duration;
+    public float preyReward;
+    public float predatorReward;
+    public float preyLoomingPeak;
+    public float predatorLoomingPeak;
+    public float captureRate;
+    public float escapeRate;
 }
