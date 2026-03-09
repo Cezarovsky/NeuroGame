@@ -17,6 +17,7 @@ REGEN_EVERY = 3         # stamina regenerează la fiecare 3 turnuri
 STAMINA_REGEN = 5.0     # câtă stamina câștigă prada la regenerare
 STAMINA_MAX = 30.0      # plafon stamina
 SPEED_SCALE = 1.0       # factor global viteză (ajustabil pentru experimente)
+MAX_STEP_CAP = 5.0      # limitează salturile mari (evită jumping over traps)
 
 
 class Prey:
@@ -33,7 +34,8 @@ class Prey:
 
     def max_step(self, turn: int) -> float:
         """Distanța maximă pe care poate să o parcurgă în acest turn."""
-        return self.stamina * SPEED_SCALE / math.log(turn + 2)
+        raw = self.stamina * SPEED_SCALE / math.log(turn + 2)
+        return min(raw, MAX_STEP_CAP)
 
     def consume_stamina(self, distance: float) -> None:
         self.stamina = max(0.0, self.stamina - distance)
@@ -50,18 +52,12 @@ class Prey:
         """
         Returnează shape (N_ACTIONS, 2) — cele N_ACTIONS poziții candidate.
 
-        Arc 180° centrat pe direcția de fugă (opusul vectorului pred→prey),
-        ±90° față de aceasta.  Razele sunt egale cu max_step(turn).
+        360° uniform — prey nu știe inițial că trebuie să fugă.
+        R-STDP va învăța să biaseze mișcarea departe de pericol.
+        Raza = max_step(turn).
         """
-        flee_dir = self.pos - predator_pos
-        norm = np.linalg.norm(flee_dir)
-        if norm < 1e-9:
-            base_angle = 0.0
-        else:
-            base_angle = math.atan2(flee_dir[1], flee_dir[0])
-
         step = self.max_step(turn)
-        angles = base_angle + np.linspace(-math.pi / 2, math.pi / 2, N_ACTIONS)
+        angles = np.linspace(0.0, 2 * math.pi, N_ACTIONS, endpoint=False)
         candidates = self.pos + step * np.column_stack(
             (np.cos(angles), np.sin(angles))
         )

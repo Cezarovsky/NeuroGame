@@ -138,11 +138,13 @@ class GameEngine:
     # Recompense
     # ------------------------------------------------------------------
 
-    def _compute_rewards(self, captured: bool) -> Tuple[float, float]:
+    def _compute_rewards(self, captured: bool, in_trap: bool = False) -> Tuple[float, float]:
         """
         Returnează (prey_reward, pred_reward).
         R-STDP are nevoie de semnal scalar per turn.
         """
+        if in_trap:
+            return -10.0, 0.0   # predatorul nu e recompensat pt capcane
         if captured:
             return -10.0, +10.0
         return +0.1, -0.05
@@ -173,16 +175,29 @@ class GameEngine:
         intercept_pt = pred_state["intercept_pt"]
         self.predator.apply_action(pred_action, intercept_pt, arena=self.arena)
 
-        # 3. Verificare captură
-        captured = self.arena.check_capture(
+        # 3. Verificare capcană (prey moare singur — segment-based pentru salturi mari)
+        prev_prey_pos = self._prey_history[-2] if len(self._prey_history) >= 2 else self.prey.pos
+        in_trap = self.arena.check_trap_segment(prev_prey_pos, self.prey.pos)
+
+        # 4. Verificare captură de predator
+        captured = (not in_trap) and self.arena.check_capture(
             self.prey.pos, self.predator.pos, self.capture_threshold
         )
 
         self.turn += 1
         timeout = self.turn >= self.max_turns
 
-        done = captured or timeout
-        prey_reward, pred_reward = self._compute_rewards(captured)
+        done = in_trap or captured or timeout
+        prey_reward, pred_reward = self._compute_rewards(captured, in_trap)
+
+        if in_trap:
+            info = "trap"
+        elif captured:
+            info = "captured"
+        elif timeout:
+            info = "timeout"
+        else:
+            info = ""
 
         result = StepResult(
             turn=self.turn,
@@ -193,7 +208,7 @@ class GameEngine:
             prey_reward=prey_reward,
             pred_reward=pred_reward,
             done=done,
-            info="captured" if captured else ("timeout" if timeout else ""),
+            info=info,
         )
 
         self.history.append(result)
@@ -215,7 +230,7 @@ class GameEngine:
 
         return EpisodeStats(
             turns=self.turn,
-            captured=last.info == "captured",
+            captured=last.info in ("captured", "trap"),  # mort = mort
             prey_total_reward=total_prey_r,
             pred_total_reward=total_pred_r,
             prey_stamina_end=self.prey.stamina,

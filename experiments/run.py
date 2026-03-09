@@ -26,13 +26,14 @@ import numpy as np
 
 from game.arena import Arena
 from game.agents import Prey, Predator, N_ACTIONS
-from game.engine import GameEngine, PolicyFn
+from game.engine import GameEngine, PolicyFn, EpisodeStats
 from neuromorphic.encoding import encode_state, N_INPUT
 from neuromorphic.network import NeuroNet
 from neuromorphic.rstdp import RSTDPController
 from neuromorphic.decoder import decode_action
 
 N_TIMESTEPS_PER_TURN = 100
+DEFAULT_SEED = 42
 LOG_DIR = Path(__file__).parent / "logs"
 
 
@@ -99,16 +100,18 @@ class NeuroPolicy:
 # ==================================================================
 
 def random_spawn(arena: Arena, rng: np.random.Generator,
-                 min_distance: float = 10.0) -> tuple[np.ndarray, np.ndarray]:
-    """Returnează (prey_pos, pred_pos) cu distanța minimă garantată."""
-    for _ in range(1000):
+                 min_distance: float = 8.0) -> tuple[np.ndarray, np.ndarray]:
+    """Returnează (prey_pos, pred_pos) cu distanța minimă garantată și fără spawn pe capcane."""
+    for _ in range(2000):
         p1 = rng.uniform([2.0, 2.0], [arena.width - 2, arena.height - 2])
         p2 = rng.uniform([2.0, 2.0], [arena.width - 2, arena.height - 2])
-        if np.linalg.norm(p1 - p2) >= min_distance:
+        if (np.linalg.norm(p1 - p2) >= min_distance
+                and not arena.check_trap(p1)
+                and not arena.check_trap(p2)):
             return p1, p2
-    # Fallback explicit în colțuri opuse
-    return (np.array([5.0, 5.0]),
-            np.array([arena.width - 5, arena.height - 5]))
+    # Fallback explicit în colțuri opuse (risc scăzut de capcane cu margin=4)
+    return (np.array([2.0, 2.0]),
+            np.array([arena.width - 2, arena.height - 2]))
 
 
 # ==================================================================
@@ -116,7 +119,10 @@ def random_spawn(arena: Arena, rng: np.random.Generator,
 # ==================================================================
 
 def train(n_episodes: int = 500, seed: int = DEFAULT_SEED,
-          arena_w: float = 50.0, arena_h: float = 50.0) -> None:
+          arena_w: float = 50.0, arena_h: float = 50.0,
+          n_timesteps: int = N_TIMESTEPS_PER_TURN,
+          max_turns: int = 500,
+          n_traps: int = 3) -> None:
 
     rng = np.random.default_rng(seed)
     arena = Arena(width=arena_w, height=arena_h)
@@ -128,8 +134,8 @@ def train(n_episodes: int = 500, seed: int = DEFAULT_SEED,
     prey_rstdp = RSTDPController(prey_net)
     pred_rstdp = RSTDPController(pred_net)
 
-    prey_policy = NeuroPolicy(prey_net,  prey_rstdp, seed=seed + 2)
-    pred_policy = NeuroPolicy(pred_net,  pred_rstdp, seed=seed + 3)
+    prey_policy = NeuroPolicy(prey_net,  prey_rstdp, n_timesteps=n_timesteps, seed=seed + 2)
+    pred_policy = NeuroPolicy(pred_net,  pred_rstdp, n_timesteps=n_timesteps, seed=seed + 3)
 
     # CSV logging
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -156,6 +162,9 @@ def train(n_episodes: int = 500, seed: int = DEFAULT_SEED,
         t0 = time.time()
 
         for ep in range(1, n_episodes + 1):
+            # Capcane noi per episod (aleator de fiecare dată)
+            arena.spawn_traps(n_traps, rng)
+
             prey_pos, pred_pos = random_spawn(arena, rng)
             prey  = Prey(prey_pos)
             pred  = Predator(pred_pos)
@@ -169,15 +178,25 @@ def train(n_episodes: int = 500, seed: int = DEFAULT_SEED,
                 predator=pred,
                 prey_policy=prey_policy,
                 pred_policy=pred_policy,
+                max_turns=max_turns,
             )
 
-            stats = engine.run_episode()
+            # Turn-by-turn cu reward per pas (R-STDP learn signal corect)
+            while not engine.done:
+                result = engine.step()
+                prey_policy.apply_reward(result.prey_reward)
+                pred_policy.apply_reward(result.pred_reward)
 
-            # Aplică reward la terminarea episodului
-            # (R-STDP fereastră 3 turnuri — deja acumulate în end_turn)
-            last_result = engine.history[-1]
-            prey_policy.apply_reward(last_result.prey_reward)
-            pred_policy.apply_reward(last_result.pred_reward)
+            last = engine.history[-1]
+            total_prey_r = sum(r.prey_reward for r in engine.history)
+            total_pred_r = sum(r.pred_reward for r in engine.history)
+            stats = EpisodeStats(
+                turns=engine.turn,
+                captured=last.info == "captured",
+                prey_total_reward=total_prey_r,
+                pred_total_reward=total_pred_r,
+                prey_stamina_end=prey.stamina,
+            )
 
             # Win rate tracking
             captured = int(stats.captured)
@@ -226,10 +245,16 @@ DEFAULT_SEED = 42
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="NeuroGame training loop")
-    p.add_argument("--episodes", type=int, default=500)
-    p.add_argument("--seed",     type=int, default=DEFAULT_SEED)
-    p.add_argument("--arena-w",  type=float, default=50.0)
-    p.add_argument("--arena-h",  type=float, default=50.0)
+    p.add_argument("--episodes",   type=int,   default=500)
+    p.add_argument("--seed",       type=int,   default=DEFAULT_SEED)
+    p.add_argument("--arena-w",    type=float, default=30.0)
+    p.add_argument("--arena-h",    type=float, default=30.0)
+    p.add_argument("--timesteps",  type=int,   default=N_TIMESTEPS_PER_TURN,
+                   help="LIF timesteps per turn (default 100)")
+    p.add_argument("--max-turns",  type=int,   default=500,
+                   help="max turns per episode (default 500)")
+    p.add_argument("--traps",      type=int,   default=8,
+                   help="număr capcane per episod (default 8, 0 = fără)")
     return p.parse_args()
 
 
@@ -240,4 +265,7 @@ if __name__ == "__main__":
         seed=args.seed,
         arena_w=args.arena_w,
         arena_h=args.arena_h,
+        n_timesteps=args.timesteps,
+        max_turns=args.max_turns,
+        n_traps=args.traps,
     )
