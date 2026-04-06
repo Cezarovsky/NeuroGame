@@ -147,7 +147,7 @@ class GameEngine:
             return -10.0, 0.0   # predatorul nu e recompensat pt capcane
         if captured:
             return -10.0, +10.0
-        return +0.1, -0.05
+        return +0.1, -0.3
 
     # ------------------------------------------------------------------
     # Un singur turn

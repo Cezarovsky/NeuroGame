@@ -1,0 +1,24 @@
+pygame 2.6.1 (SDL 2.28.4, Python 3.12.3)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+Ep    50 | captures    9 (18.0%) | timeouts    0 | ε=0.380 | speed x10
+Ep   100 | captures   18 (18.0%) | timeouts    0 | ε=0.362 | speed x10
+Ep   150 | captures   28 (18.7%) | timeouts    0 | ε=0.344 | speed x10
+Ep   200 | captures   40 (20.0%) | timeouts    0 | ε=0.327 | speed x10
+
+[CONSOLIDARE Ep   200]  ΔW_in=0.01391(prag 0.01)  Δcap=0.040(prag 0.04)  tout/100=0(min 10)  cap%=22.0
+  → Încă în formare.
+Ep   250 | captures   54 (21.6%) | timeouts    0 | ε=0.311 | speed x10
+Ep   300 | captures   61 (20.3%) | timeouts    0 | ε=0.296 | speed x10
+
+[CONSOLIDARE Ep   300]  ΔW_in=0.00898(prag 0.01)  Δcap=0.010(prag 0.04)  tout/100=0(min 10)  cap%=21.0
+  → Încă în formare.
+Ep   350 | captures   70 (20.0%) | timeouts    0 | ε=0.282 | speed x10
+Ep   400 | captures   81 (20.2%) | timeouts    0 | ε=0.268 | speed x10
+
+[CONSOLIDARE Ep   400]  ΔW_in=0.00905(prag 0.01)  Δcap=0.010(prag 0.04)  tout/100=0(min 10)  cap%=20.0
+  → Încă în formare.
+Ep   450 | captures   96 (21.3%) | timeouts    0 | ε=0.255 | speed x10
+Ep   500 | captures  103 (20.6%) | timeouts    0 | ε=0.243 | speed x10
+
+[CONSOLIDARE Ep   500]  ΔW_in=0.00855(prag 0.01)  Δcap=0.020(prag 0.04)  tout/100=0(min 10)  cap%=22.0
+  → Încă în formare.

@@ -1,10 +1,11 @@
 """
-Encoding — state dict → spike rates (65 neuroni).
+Encoding — state dict → spike rates (73 neuroni).
 
 Structura vectorului de rates:
   [0:32]   — inel oponent: rata ∝ 1/distanță², pe bucket unghiular spre oponent
   [32:64]  — inel pereți: rata ∝ 1/distanță per direcție (N_WALL_DIRECTIONS raze)
   [64]     — stamina ratio [0, 1]
+  [65:73]  — inel iarbă: 8 neuroni direcționali spre cel mai apropiat patch
 
 Rates sunt normalize în [0, 1] — LAVA spike generator le transformă în
 frecvențe de spike în encoding.py → network.py.
@@ -21,11 +22,16 @@ from game.arena import Arena, N_WALL_DIRECTIONS
 N_OPPONENT_NEURONS = 32      # inel unghiular pentru oponent
 N_WALL_NEURONS = N_WALL_DIRECTIONS  # == 32
 N_STAMINA_NEURONS = 1
-N_INPUT = N_OPPONENT_NEURONS + N_WALL_NEURONS + N_STAMINA_NEURONS  # = 65
+N_GRASS_NEURONS = 8          # inel direcțional spre cel mai apropiat patch de iarbă
+N_INPUT = N_OPPONENT_NEURONS + N_WALL_NEURONS + N_STAMINA_NEURONS + N_GRASS_NEURONS  # = 73
 
 # Parametri encoding oponent
 DIST_MIN = 0.5               # distanță minimă (evităm div/0)
 DIST_SCALE = 10.0            # normalizare distanță (rata maximă la ~1 unitate)
+
+# Parametri encoding iarbă
+GRASS_DIST_SCALE = 5.0       # semnal maxim la 5 unități distanță
+GRASS_SIGMA = 1.0            # lățimea gaussianei (bucket-uri)
 
 
 def _angle_bucket(angle_rad: float, n_buckets: int) -> int:
@@ -76,25 +82,57 @@ def _wall_ring(self_pos: np.ndarray, arena: Arena) -> np.ndarray:
     return proximity
 
 
+def _grass_ring(self_pos: np.ndarray,
+                patches: list[tuple[float, float]],
+                n_neurons: int = N_GRASS_NEURONS) -> np.ndarray:
+    """
+    8 neuroni direcționali spre cel mai apropiat patch de iarbă.
+    Activare 0 dacă nu există patch-uri.
+    """
+    if not patches:
+        return np.zeros(n_neurons)
+
+    # Găsim cel mai apropiat patch
+    dists = [max(float(np.linalg.norm(self_pos - np.array(p))), DIST_MIN)
+             for p in patches]
+    nearest = np.array(patches[int(np.argmin(dists))])
+    dist    = min(dists)
+
+    delta     = nearest - self_pos
+    angle     = math.atan2(delta[1], delta[0])
+    amplitude = min(1.0, (GRASS_DIST_SCALE / dist) ** 2)
+
+    rates  = np.zeros(n_neurons)
+    center = angle / (2 * math.pi) * n_neurons
+    for i in range(n_neurons):
+        d = abs(((i - center + n_neurons / 2) % n_neurons) - n_neurons / 2)
+        rates[i] = amplitude * math.exp(-0.5 * (d / GRASS_SIGMA) ** 2)
+
+    return rates
+
+
 def encode_state(state_dict: dict) -> np.ndarray:
     """
     Transformă state_dict (primit din engine.py) în
-    vectorul de rates shape (N_INPUT,) = (65,).
+    vectorul de rates shape (N_INPUT,) = (73,).
 
     state_dict conține:
       self_pos, opponent_pos, stamina, stamina_max, arena  (obligatoriu)
+      grass_patches: list[(x, y)] — opțional, patch-uri de iarbă active
     """
-    self_pos = state_dict["self_pos"]
+    self_pos     = state_dict["self_pos"]
     opponent_pos = state_dict["opponent_pos"]
     arena: Arena = state_dict["arena"]
-    stamina = float(state_dict.get("stamina", 0.0))
-    stamina_max = float(state_dict.get("stamina_max", 30.0))
+    stamina      = float(state_dict.get("stamina", 0.0))
+    stamina_max  = float(state_dict.get("stamina_max", 30.0))
+    grass        = state_dict.get("grass_patches", [])
 
-    opp_ring = _opponent_ring(self_pos, opponent_pos)              # (32,)
-    wall_ring = _wall_ring(self_pos, arena)                        # (32,)
-    stamina_rate = np.array([stamina / max(stamina_max, 1e-9)])    # (1,)
+    opp_ring     = _opponent_ring(self_pos, opponent_pos)           # (32,)
+    wall_ring    = _wall_ring(self_pos, arena)                      # (32,)
+    stamina_rate = np.array([stamina / max(stamina_max, 1e-9)])     # (1,)
+    grass_ring   = _grass_ring(self_pos, grass)                     # (8,)
 
-    return np.concatenate([opp_ring, wall_ring, stamina_rate])     # (65,)
+    return np.concatenate([opp_ring, wall_ring, stamina_rate, grass_ring])  # (73,)
 
 
 def rates_to_spikes(rates: np.ndarray, n_timesteps: int,
