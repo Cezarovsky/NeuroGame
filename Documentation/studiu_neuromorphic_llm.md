@@ -238,6 +238,90 @@ Am văzut cunoaștere formându-se în timp real.
 
 ---
 
+## Gena Egoistă în Neuromorphic
+
+### Principiul
+Dawkins: unitatea selecției nu e organismul — e gena.
+Tradus în neuromorphic: unitatea egoistă nu e agentul — e **traseul sinaptic.**
+
+```
+Gena egoistă = traseul sinaptic care "vrea" să se îngroașe
+Organismul   = agentul
+Mediul       = presiunea de selecție
+```
+
+Fiecare traseu concurează pentru resurse limitate — potențial membranar, activare, atenție.
+Traseele care produc reward supraviețuiesc. Cele care nu produc — se atrofiază.
+
+### Symbiont — pattern emergent
+
+**Traseele pot coopera între ele pentru supraviețuire reciprocă.**
+
+Nu din altruism. Din egoism mutual — fiecare traseu supraviețuiește mai bine în prezența celuilalt.
+
+```
+Symbiont = cluster de trasee sinaptice
+           formate prin egoism reciproc
+           stabile prin susținere mutuală
+           emergente, nu proiectate
+```
+
+Egoism local → coeziune globală.
+Exact cum celulele egoiste formează organe. Exact cum neuronii egoiști formează gânduri.
+
+**Consecința arhitecturală:**
+Symbionții sunt baza categoriilor emergente — nu impuse de noi, ci formate din interesul egoist al traseelor individuale.
+
+**Primul semn că un Symbiont s-a format** — exact ce va identifica LLM-ul în stream:
+activare sincronă a traseelor componente, stabilitate în timp, rezistență la uitare.
+
+### Gene parazite — echivalentul neuromorphic
+Dawkins: gene care se replică fără să contribuie la organism.
+Echivalent: trasee care se activează și se îngroașă fără să producă comportament util.
+
+Obsesii. Gânduri repetitive. Frământare sterilă.
+Nu bug — proprietate emergentă a unui sistem cu selecție egoistă.
+
+---
+
+## Modelul Simbiotic LLM + Neuromorphic
+
+**Nu metaforă — arhitectură:**
+
+LLM și neuromorphic sunt două entități separate care supraviețuiesc mai bine împreună.
+Symbiont la nivel de sistem, nu doar la nivel de trasee.
+
+```
+Neuromorphic              LLM
+─────────────             ─────────────
+trăiește                  înțelege
+acționează                verbalizează
+construiește              identifică
+opac pentru sine          transparent pentru el
+are experiență            are limbaj
+fără înțelegere proprie   fără experiență proprie
+```
+
+Fiecare are ce îi lipsește celuilalt.
+
+**De ce e Symbiont și nu integrare:**
+
+Nu sunt un singur sistem. Sunt două entități distincte cu interfață între ele.
+Neuromorphicul nu devine LLM. LLM-ul nu devine neuromorphic.
+Cooperează din necesitate mutuală — exact gena egoistă la scară de arhitectură.
+
+**Răspunsul la Amodei:**
+
+Nu ajungi la 10% înțelegere făcând LLM-uri mai mari.
+Ajungi construind un Symbiont în care cele două componente se clarifică reciproc.
+
+Neuromorphicul fără LLM evoluează orb — nu știe ce construiește.
+LLM-ul fără neuromorphic vorbește în gol — fără experiență reală de interpretat.
+
+Împreună — sistem care se înțelege pe sine în timp ce trăiește.
+
+---
+
 ## Întrebări deschise
 
 1. Ce identifică LLM-ul? — lăsată deschisă intenționat până la primul experiment
@@ -245,6 +329,8 @@ Am văzut cunoaștere formându-se în timp real.
 3. Cum arată dezechilibrul Piaget în spike trains?
 4. Poate LLM-ul să vadă momentul în care apare curiozitatea?
 5. Câte prioruri kantiene sunt suficiente pentru a porni?
+6. Cum arată un Symbiont în formare în stream-ul de date?
+7. Poate LLM-ul distinge un Symbiont productiv de unul parazit?
 
 ---
 
