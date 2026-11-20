@@ -22,3 +22,80 @@ Ep   500 | captures  103 (20.6%) | timeouts    0 | ε=0.243 | speed x10
 
 [CONSOLIDARE Ep   500]  ΔW_in=0.00855(prag 0.01)  Δcap=0.020(prag 0.04)  tout/100=0(min 10)  cap%=22.0
   → Încă în formare.
+Ep   550 | captures  108 (19.6%) | timeouts    0 | ε=0.231 | speed x10
+Ep   600 | captures  119 (19.8%) | timeouts    0 | ε=0.219 | speed x10
+
+[CONSOLIDARE Ep   600]  ΔW_in=0.00777(prag 0.01)  Δcap=0.060(prag 0.04)  tout/100=0(min 10)  cap%=16.0
+  → Încă în formare.
+Ep   650 | captures  126 (19.4%) | timeouts    0 | ε=0.209 | speed x10
+Ep   700 | captures  135 (19.3%) | timeouts    0 | ε=0.199 | speed x10
+
+[CONSOLIDARE Ep   700]  ΔW_in=0.00820(prag 0.01)  Δcap=0.000(prag 0.04)  tout/100=0(min 10)  cap%=16.0
+  → Încă în formare.
+Ep   750 | captures  150 (20.0%) | timeouts    0 | ε=0.189 | speed x10
+Ep   800 | captures  159 (19.9%) | timeouts    0 | ε=0.180 | speed x10
+
+[CONSOLIDARE Ep   800]  ΔW_in=0.00820(prag 0.01)  Δcap=0.080(prag 0.04)  tout/100=0(min 10)  cap%=24.0
+  → Încă în formare.
+Ep   850 | captures  171 (20.1%) | timeouts    0 | ε=0.171 | speed x10
+Ep   900 | captures  180 (20.0%) | timeouts    0 | ε=0.163 | speed x10
+
+[CONSOLIDARE Ep   900]  ΔW_in=0.00884(prag 0.01)  Δcap=0.030(prag 0.04)  tout/100=0(min 10)  cap%=21.0
+  → Încă în formare.
+Ep   950 | captures  187 (19.7%) | timeouts    0 | ε=0.155 | speed x10
+Ep  1000 | captures  203 (20.3%) | timeouts    0 | ε=0.147 | speed x10
+
+[CONSOLIDARE Ep  1000]  ΔW_in=0.00886(prag 0.01)  Δcap=0.020(prag 0.04)  tout/100=0(min 10)  cap%=23.0
+  → Încă în formare.
+Ep  1050 | captures  214 (20.4%) | timeouts    0 | ε=0.140 | speed x10
+Ep  1100 | captures  230 (20.9%) | timeouts    0 | ε=0.133 | speed x10
+
+[CONSOLIDARE Ep  1100]  ΔW_in=0.00837(prag 0.01)  Δcap=0.040(prag 0.04)  tout/100=0(min 10)  cap%=27.0
+  → Încă în formare.
+Ep  1150 | captures  247 (21.5%) | timeouts    0 | ε=0.127 | speed x10
+Ep  1200 | captures  262 (21.8%) | timeouts    0 | ε=0.120 | speed x10
+
+[CONSOLIDARE Ep  1200]  ΔW_in=0.00917(prag 0.01)  Δcap=0.050(prag 0.04)  tout/100=0(min 10)  cap%=32.0
+  → Încă în formare.
+Ep  1250 | captures  280 (22.4%) | timeouts    1 | ε=0.115 | speed x10
+Ep  1300 | captures  301 (23.2%) | timeouts    2 | ε=0.109 | speed x10
+
+[CONSOLIDARE Ep  1300]  ΔW_in=0.00962(prag 0.01)  Δcap=0.070(prag 0.04)  tout/100=2(min 10)  cap%=39.0
+  → Încă în formare.
+Ep  1350 | captures  316 (23.4%) | timeouts    2 | ε=0.104 | speed x10
+Ep  1400 | captures  333 (23.8%) | timeouts    2 | ε=0.099 | speed x10
+
+[CONSOLIDARE Ep  1400]  ΔW_in=0.00974(prag 0.01)  Δcap=0.070(prag 0.04)  tout/100=0(min 10)  cap%=32.0
+  → Încă în formare.
+Ep  1450 | captures  359 (24.8%) | timeouts    2 | ε=0.094 | speed x10
+Ep  1500 | captures  376 (25.1%) | timeouts    2 | ε=0.089 | speed x10
+
+[CONSOLIDARE Ep  1500]  ΔW_in=0.00926(prag 0.01)  Δcap=0.110(prag 0.04)  tout/100=0(min 10)  cap%=43.0
+  → Încă în formare.
+Ep  1550 | captures  393 (25.4%) | timeouts    3 | ε=0.085 | speed x10
+Ep  1600 | captures  414 (25.9%) | timeouts    6 | ε=0.081 | speed x10
+
+[CONSOLIDARE Ep  1600]  ΔW_in=0.00919(prag 0.01)  Δcap=0.050(prag 0.04)  tout/100=4(min 10)  cap%=38.0
+  → Încă în formare.
+Ep  1650 | captures  439 (26.6%) | timeouts    6 | ε=0.077 | speed x10
+Ep  1700 | captures  458 (26.9%) | timeouts    6 | ε=0.073 | speed x10
+
+[CONSOLIDARE Ep  1700]  ΔW_in=0.00761(prag 0.01)  Δcap=0.060(prag 0.04)  tout/100=0(min 10)  cap%=44.0
+  → Încă în formare.
+Ep  1750 | captures  480 (27.4%) | timeouts    6 | ε=0.069 | speed x10
+Ep  1800 | captures  505 (28.1%) | timeouts    6 | ε=0.066 | speed x10
+
+[CONSOLIDARE Ep  1800]  ΔW_in=0.00894(prag 0.01)  Δcap=0.030(prag 0.04)  tout/100=0(min 10)  cap%=47.0
+  → Încă în formare.
+Ep  1850 | captures  530 (28.6%) | timeouts    7 | ε=0.063 | speed x10
+Ep  1900 | captures  552 (29.1%) | timeouts    8 | ε=0.060 | speed x10
+
+[CONSOLIDARE Ep  1900]  ΔW_in=0.00928(prag 0.01)  Δcap=0.000(prag 0.04)  tout/100=2(min 10)  cap%=47.0
+  → Încă în formare.
+Ep  1950 | captures  584 (29.9%) | timeouts    9 | ε=0.057 | speed x10
+Ep  2000 | captures  607 (30.3%) | timeouts   10 | ε=0.054 | speed x10
+
+[CONSOLIDARE Ep  2000]  ΔW_in=0.01016(prag 0.01)  Δcap=0.080(prag 0.04)  tout/100=2(min 10)  cap%=55.0
+  → Încă în formare.
+
+Final: 607 capturi / 2000 episoade (30.3%)

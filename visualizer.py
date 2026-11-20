@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import pickle
 import sys
 from pathlib import Path
 
@@ -191,6 +192,8 @@ ARENA_W = 30.0   # lățimea arenei în unități Python
 ARENA_H = 30.0   # înălțimea arenei
 N_TRAPS = 3      # numărul de capcane (folosit în argparse; intern suprascriem cu TRAP_SIZES)
 SEED    = 42     # seed pentru reproductibilitate completă a simulării
+
+CHECKPOINT_FILE = Path("checkpoints/snn_checkpoint.pkl")  # checkpoint persistent între rulări
 
 
 # ==================================================================
@@ -694,9 +697,46 @@ class Renderer:
 # FUNCȚIA PRINCIPALĂ run()
 # ==================================================================
 
+def save_checkpoint(prey_net, pred_net, episode_history, pred_epsilon, ep, captures, timeouts):
+    """Salvează starea completă a simulării pe disc."""
+    CHECKPOINT_FILE.parent.mkdir(exist_ok=True)
+    data = {
+        "prey_W_in":       prey_net.W_in.copy(),
+        "prey_W_rec":      prey_net.W_rec.copy(),
+        "pred_W_in":       pred_net.W_in.copy(),
+        "pred_W_rec":      pred_net.W_rec.copy(),
+        "episode_history": episode_history,
+        "pred_epsilon":    pred_epsilon,
+        "last_episode":    ep,
+        "captures":        captures,
+        "timeouts":        timeouts,
+    }
+    with open(CHECKPOINT_FILE, "wb") as f:
+        pickle.dump(data, f)
+    print(f"  [checkpoint salvat: ep {ep}]")
+
+
+def load_checkpoint(prey_net, pred_net):
+    """
+    Încarcă checkpoint dacă există. Returnează dict cu starea sau None.
+    Restaurează W_in și W_rec direct în rețele.
+    """
+    if not CHECKPOINT_FILE.exists():
+        return None
+    with open(CHECKPOINT_FILE, "rb") as f:
+        data = pickle.load(f)
+    prey_net.W_in[:]  = data["prey_W_in"]
+    prey_net.W_rec[:] = data["prey_W_rec"]
+    pred_net.W_in[:]  = data["pred_W_in"]
+    pred_net.W_rec[:] = data["pred_W_rec"]
+    ep = data["last_episode"]
+    print(f"  [checkpoint încărcat: reluăm de la ep {ep + 1}]")
+    return data
+
+
 def run(n_episodes: int = 500, seed: int = SEED,
         headless: bool = False, speed: int = 1,
-        n_traps: int = N_TRAPS):
+        n_traps: int = N_TRAPS, resume: bool = True):
     """
     Inițializează și rulează întreaga simulare.
 
@@ -730,6 +770,9 @@ def run(n_episodes: int = 500, seed: int = SEED,
     # trebuie separat de rng principal pentru a nu afecta spawn-urile
     prey_policy = NeuroPolicy(prey_net, RSTDPController(prey_net), seed=seed + 2)
     pred_policy = NeuroPolicy(pred_net, RSTDPController(pred_net), seed=seed + 3)
+
+    # ── Checkpoint resume ─────────────────────────────────────────
+    _ckpt = load_checkpoint(prey_net, pred_net) if resume else None
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # INIȚIALIZARE PYGAME
@@ -1054,10 +1097,18 @@ def run(n_episodes: int = 500, seed: int = SEED,
         return pred_policy_l0(state_dict)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # STATISTICI GLOBALE
+    # STATISTICI GLOBALE (restaurate din checkpoint dacă există)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    captures  = 0   # numărul total de episoade câștigate de Fenrir (prin captură)
-    timeouts  = 0   # numărul total de episoade terminate prin timeout
+    if _ckpt:
+        captures         = _ckpt["captures"]
+        timeouts         = _ckpt["timeouts"]
+        pred_epsilon     = _ckpt["pred_epsilon"]
+        episode_history  = _ckpt["episode_history"]
+        _start_ep        = _ckpt["last_episode"] + 1
+    else:
+        captures         = 0
+        timeouts         = 0
+        _start_ep        = 1
     last_info = ""  # "captured" / "timeout" / "trap" — rezultatul ultimului episod
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1087,10 +1138,12 @@ def run(n_episodes: int = 500, seed: int = SEED,
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # PLATEAU DETECTOR — monitorizare consolidare SNN
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    episode_history: list[tuple[float, float, str]] = []
+    if not _ckpt:
+        episode_history: list[tuple[float, float, str]] = []
     # Acumulăm (ep_prey_r, ep_pred_r, info) pentru fiecare episod.
     # info = "captured" / "timeout" / "trap" — rezultatul episodului.
     # Folosit de plateau detector pentru capture rate și timeout growth.
+    # Dacă există checkpoint, episode_history e deja restaurată din STATISTICI block.
 
     _w_in_snapshot = prey_policy.net.W_in.copy()
     # Snapshot al matricei de greutăți W_in a Umbrei (shape: 256×73).
@@ -1210,7 +1263,7 @@ def run(n_episodes: int = 500, seed: int = SEED,
     # LOOP PRINCIPAL — EPISOADE
     # ==================================================================
 
-    for ep in range(1, n_episodes + 1):
+    for ep in range(_start_ep, n_episodes + 1):
 
         # ─── Reset la început de episod ───────────────────────────
         # random_spawn: generează poziții inițiale pentru ambii agenți
@@ -1364,9 +1417,11 @@ def run(n_episodes: int = 500, seed: int = SEED,
             print(f"Ep {ep:5d} | captures {captures:4d} ({rate:.1f}%) "
                   f"| timeouts {timeouts:4d} | ε={pred_epsilon:.3f} | speed x{speed}")
 
-        # Verificare platou la fiecare 100 episoade
+        # Verificare platou + checkpoint la fiecare 100 episoade
         if ep % PLATEAU_WINDOW == 0:
             _check_plateau(ep)
+            save_checkpoint(prey_policy.net, pred_policy.net,
+                            episode_history, pred_epsilon, ep, captures, timeouts)
 
     if not headless:
         pygame.quit()
@@ -1388,6 +1443,8 @@ def parse_args():
     p.add_argument("--traps",    type=int,  default=N_TRAPS)
     p.add_argument("--headless", action="store_true",
                    help="training fără fereastră Pygame")
+    p.add_argument("--no-resume", action="store_true",
+                   help="ignoră checkpoint, pornește de la zero")
     return p.parse_args()
 
 
@@ -1399,4 +1456,5 @@ if __name__ == "__main__":
         headless=args.headless,
         speed=args.speed,
         n_traps=args.traps,
+        resume=not args.no_resume,
     )
