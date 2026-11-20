@@ -94,7 +94,7 @@ from experiments.run import NeuroPolicy, random_spawn
 # Schimbarea lor afectează DOAR afișarea, nu simularea.
 # ==================================================================
 
-WIN_W, WIN_H = 700, 700
+WIN_W, WIN_H = 900, 900
 # Dimensiunea ferestrei Pygame. Ambele dimensiuni egale → arenă pătrată.
 # Dacă schimbi WIN_W ≠ WIN_H, CoordMapper va distorsiona axa X vs Y.
 
@@ -188,12 +188,13 @@ PRED_EPSILON_MIN   = 0.05
 PRED_EPSILON_DECAY = 0.999
 
 # ─── Parametri arenă și training ──────────────────────────────────
-ARENA_W = 30.0   # lățimea arenei în unități Python
-ARENA_H = 30.0   # înălțimea arenei
+ARENA_W = 90.0   # lățimea arenei în unități Python (era 30 — mărită pentru teren cu dealuri)
+ARENA_H = 90.0   # înălțimea arenei
 N_TRAPS = 3      # numărul de capcane (folosit în argparse; intern suprascriem cu TRAP_SIZES)
 SEED    = 42     # seed pentru reproductibilitate completă a simulării
 
-CHECKPOINT_FILE = Path("checkpoints/snn_checkpoint.pkl")  # checkpoint persistent între rulări
+CHECKPOINT_FILE = Path("checkpoints/snn_teren.pkl")  # checkpoint persistent între rulări
+# snn_checkpoint.pkl = creierul antrenat pe arena 30×30 fără teren — nu se suprascrie
 
 
 # ==================================================================
