@@ -191,7 +191,7 @@ PRED_EPSILON_DECAY = 0.999
 ARENA_W = 90.0   # lățimea arenei în unități Python (era 30 — mărită pentru teren cu dealuri)
 ARENA_H = 90.0   # înălțimea arenei
 N_TRAPS = 3      # numărul de capcane (folosit în argparse; intern suprascriem cu TRAP_SIZES)
-SEED    = 42     # seed pentru reproductibilitate completă a simulării
+SEED    = None   # None = seed nou la fiecare rulare (afișat); --seed N pentru reproductibilitate
 
 CHECKPOINT_FILE = Path("checkpoints/snn_teren.pkl")  # checkpoint persistent între rulări
 # snn_checkpoint.pkl = creierul antrenat pe arena 30×30 fără teren — nu se suprascrie
@@ -735,7 +735,7 @@ def load_checkpoint(prey_net, pred_net):
     return data
 
 
-def run(n_episodes: int = 500, seed: int = SEED,
+def run(n_episodes: int = 500, seed: int | None = SEED,
         headless: bool = False, speed: int = 1,
         n_traps: int = N_TRAPS, resume: bool = True):
     """
@@ -758,6 +758,9 @@ def run(n_episodes: int = 500, seed: int = SEED,
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # np.random.default_rng(seed): generator modern NumPy (PCG64).
     # Mai bun decât np.random.seed() pentru că e explicit și izolat.
+    if seed is None:
+        seed = int(np.random.SeedSequence().entropy % 2**31)
+    print(f"Seed: {seed}  (reproduci rularea cu --seed {seed})")
     rng   = np.random.default_rng(seed)
     arena = Arena(width=ARENA_W, height=ARENA_H)
 
