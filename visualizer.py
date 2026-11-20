@@ -84,6 +84,7 @@ from game.engine import GameEngine
 from neuromorphic.network import NeuroNet
 from neuromorphic.rstdp import RSTDPController
 from experiments.run import NeuroPolicy, random_spawn
+from game.terrain import Terrain, CONTOUR_STEP
 
 
 # ==================================================================
@@ -122,6 +123,9 @@ C_GRASS      = (50,  180,  50)      # verde mediu — patch iarbă activ
 C_GRASS_EATEN= (30,  100,  30)      # verde închis — patch mâncat (în regen)
 C_CAPTURE    = (255, 255, 100)      # galben — mesaj "CAPTURAT!"
 C_TIMEOUT    = (100, 150, 255)      # albastru — mesaj "TIMEOUT"
+C_HILL_TOP   = (75,  80,  72)       # gri-măsliniu — vârfurile dealurilor (văile rămân C_ARENA)
+C_CONTOUR    = (90, 105, 125)       # izolinie obișnuită
+C_CONTOUR_MAJOR = (140, 150, 170)   # izolinie principală (fiecare a 4-a)
 
 
 # ==================================================================
@@ -191,6 +195,9 @@ PRED_EPSILON_DECAY = 0.999
 ARENA_W = 90.0   # lățimea arenei în unități Python (era 30 — mărită pentru teren cu dealuri)
 ARENA_H = 90.0   # înălțimea arenei
 N_TRAPS = 3      # numărul de capcane (folosit în argparse; intern suprascriem cu TRAP_SIZES)
+N_HILLS = 12            # dealuri pe arena 90×90 (fixe pe rulare, ca și capcanele)
+HILL_HEIGHT = (1.5, 4.0)   # altitudinea vârfului
+HILL_SIGMA  = (5.0, 10.0)  # lățimea dealului — mai late decât în demo, pe măsura arenei
 SEED    = None   # None = seed nou la fiecare rulare (afișat); --seed N pentru reproductibilitate
 
 CHECKPOINT_FILE = Path("checkpoints/snn_teren.pkl")  # checkpoint persistent între rulări
@@ -549,6 +556,37 @@ class Renderer:
         self.surf    = pygame.display.get_surface()
         self.font_lg = pygame.font.SysFont("monospace", 18, bold=True)  # pentru mesaje mari
         self.font_sm = pygame.font.SysFont("monospace", 13)             # pentru HUD
+        self.terrain_surf = None   # relief pre-randat (set_terrain), None = arenă plată
+
+    def set_terrain(self, terrain: Terrain):
+        """
+        Pre-randează relieful O SINGURĂ DATĂ pe rulare (dealurile sunt fixe).
+
+        Fiecare pixel al arenei primește altitudinea punctului din centrul lui:
+            - fundalul se luminează cu altitudinea (văile închise, vârfurile deschise)
+            - izolinie = pixel unde nivelul floor(z / CONTOUR_STEP) diferă de vecinul
+              din dreapta sau de jos; fiecare a 4-a izolinie e mai groasă (ca pe hartă)
+        """
+        cm = self.cm
+        w, h = cm.draw_w, cm.draw_h
+        xs = (np.arange(w) + 0.5) / w * cm.arena_w
+        ys = cm.arena_h - (np.arange(h) + 0.5) / h * cm.arena_h   # rândul 0 = sus
+        gx, gy = np.meshgrid(xs, ys)
+        z = terrain.altitude(gx, gy)                              # [h, w]
+
+        shade = np.clip(z / max(float(z.max()), 1e-6), 0.0, 1.0)[..., None]
+        rgb = np.array(C_ARENA, float) + shade * (np.array(C_HILL_TOP, float) - np.array(C_ARENA, float))
+
+        level = np.floor(z / CONTOUR_STEP).astype(int)
+        edge = np.zeros_like(level, dtype=bool)
+        edge[:, :-1] |= level[:, :-1] != level[:, 1:]
+        edge[:-1, :] |= level[:-1, :] != level[1:, :]
+        major = edge & (np.maximum(level, 1) % 4 == 0)
+        rgb[edge]  = C_CONTOUR
+        rgb[major] = C_CONTOUR_MAJOR
+
+        # surfarray vrea [w, h, 3] (x primul), noi avem [h, w, 3]
+        self.terrain_surf = pygame.surfarray.make_surface(rgb.astype(np.uint8).transpose(1, 0, 2))
 
     def draw_arena(self, traps):
         """
@@ -571,7 +609,10 @@ class Renderer:
         """
         cm = self.cm
         arena_rect = pygame.Rect(cm.ox, cm.oy, cm.draw_w, cm.draw_h)
-        pygame.draw.rect(self.surf, C_ARENA, arena_rect)      # umplut
+        if self.terrain_surf is not None:
+            self.surf.blit(self.terrain_surf, (cm.ox, cm.oy))  # relief cu izolinii
+        else:
+            pygame.draw.rect(self.surf, C_ARENA, arena_rect)  # umplut
         pygame.draw.rect(self.surf, C_WALL,  arena_rect, 2)   # contur 2px
 
         for cx, cy, r in traps:
@@ -1138,6 +1179,13 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
             cy = rng.uniform(3.0, arena.height - 3.0)
             arena.traps.append((cx, cy, r))
             break   # ← ieșim după primul succes; capcanele nu se verifică față de iarbă
+
+    # ─── Relief ───────────────────────────────────────────────────
+    # Etapa 1: doar vizual. Agenții nu simt încă terenul (fără pantă, ceață, cost).
+    terrain = Terrain.random(arena.width, arena.height, rng,
+                             n_hills=N_HILLS, h_range=HILL_HEIGHT, sigma_range=HILL_SIGMA)
+    if not headless:
+        rend.set_terrain(terrain)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # PLATEAU DETECTOR — monitorizare consolidare SNN
