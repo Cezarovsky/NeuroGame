@@ -59,9 +59,12 @@ RULARE
 from __future__ import annotations
 
 import argparse
+import csv
+import json
 import math
 import pickle
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -201,6 +204,7 @@ HILL_SIGMA  = (5.0, 10.0)  # lățimea dealului — mai late decât în demo, pe
 SEED    = None   # None = seed nou la fiecare rulare (afișat); --seed N pentru reproductibilitate
 
 CHECKPOINT_FILE = Path("checkpoints/snn_teren.pkl")  # checkpoint persistent între rulări
+LOG_DIR = Path("experiments/logs")   # un CSV per rulare (rând per episod) + JSON cu lumea
 # snn_checkpoint.pkl = creierul antrenat pe arena 30×30 fără teren — nu se suprascrie
 
 
@@ -776,6 +780,41 @@ def load_checkpoint(prey_net, pred_net):
     return data
 
 
+# Coloanele jurnalului de episod (experiments/logs/run_*.csv)
+LOG_FIELDS = [
+    "episode", "outcome", "turns",
+    "prey_reward", "pred_reward", "pred_epsilon",
+    "grass_eaten",
+    "dist_start", "dist_min", "dist_end",
+    "prey_path", "pred_path",                        # distanța parcursă
+    "prey_alt_mean", "pred_alt_mean", "pred_alt_max",  # cât stă sus (relevant din etapa 2)
+    "prey_dW_in", "pred_dW_in",                      # cât a învățat în episod (‖ΔW_in‖)
+    "prey_W_in_norm", "pred_W_in_norm",
+]
+
+
+def open_run_log(seed: int, arena: Arena, terrain: Terrain):
+    """
+    Deschide jurnalul rulării: CSV cu un rând per episod + JSON cu lumea
+    (seed, dealuri, capcane), ca o rulare să poată fi reconstruită și analizată.
+    Rândurile se scriu cu flush imediat — jurnalul rămâne valid și dacă închizi fereastra.
+    """
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    stem = f"run_{datetime.now():%Y%m%d_%H%M%S}_seed{seed}"
+    world = {
+        "seed": seed, "arena": [arena.width, arena.height],
+        "hills": terrain.hills, "traps": arena.traps,
+        "checkpoint": str(CHECKPOINT_FILE),
+    }
+    (LOG_DIR / f"{stem}.json").write_text(json.dumps(world, indent=2))
+    f = open(LOG_DIR / f"{stem}.csv", "w", newline="")
+    writer = csv.DictWriter(f, fieldnames=LOG_FIELDS)
+    writer.writeheader()
+    f.flush()
+    print(f"Jurnal: {LOG_DIR / stem}.csv")
+    return f, writer
+
+
 def run(n_episodes: int = 500, seed: int | None = SEED,
         headless: bool = False, speed: int = 1,
         n_traps: int = N_TRAPS, resume: bool = True):
@@ -1187,6 +1226,8 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
     if not headless:
         rend.set_terrain(terrain)
 
+    log_file, log_writer = open_run_log(seed, arena, terrain)
+
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # PLATEAU DETECTOR — monitorizare consolidare SNN
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1356,6 +1397,15 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
         ep_prey_r = 0.0   # acumulator reward Umbra (resetat per episod)
         ep_pred_r = 0.0   # acumulator reward Fenrir
 
+        # Acumulatori pentru jurnal (per episod)
+        dist_start   = float(np.linalg.norm(prey.pos - pred.pos))
+        dist_min     = dist_start
+        grass_eaten  = 0
+        prey_path = pred_path = 0.0
+        prey_alt_sum = pred_alt_sum = pred_alt_max = 0.0
+        prey_W0 = prey_policy.net.W_in.copy()
+        pred_W0 = pred_policy.net.W_in.copy()
+
         # ─── Loop turnuri ─────────────────────────────────────────
         # engine.done devine True când: captură / capcană / timeout
         while not engine.done:
@@ -1390,12 +1440,23 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
                 #   4. Clipuieste pozițiile la marginile arenei
                 #   5. Verifică captură (dist < CORE_R) și capcane
                 #   6. Returnează EpisodeResult cu done, info, pozițiile noi
+                prey_prev, pred_prev = engine.prey.pos.copy(), engine.predator.pos.copy()
                 result = engine.step()
+
+                # Jurnal: drum parcurs, distanță minimă, altitudini
+                prey_path += float(np.linalg.norm(engine.prey.pos - prey_prev))
+                pred_path += float(np.linalg.norm(engine.predator.pos - pred_prev))
+                dist_min = min(dist_min, float(np.linalg.norm(engine.prey.pos - engine.predator.pos)))
+                prey_alt_sum += terrain.altitude(*engine.prey.pos)
+                pred_alt = terrain.altitude(*engine.predator.pos)
+                pred_alt_sum += pred_alt
+                pred_alt_max = max(pred_alt_max, pred_alt)
 
                 # Update iarbă DUPĂ mișcarea agenților
                 # eaten_pos ≠ None → Umbra tocmai a terminat de mâncat un patch (după GRASS_EAT_TURNS turnuri)
                 grass_reward, eaten_pos = grass_mgr.update(engine.prey.pos)
                 if eaten_pos is not None:
+                    grass_eaten += 1
                     # Patch consumat → activăm linger: Umbra rămâne lângă locul mâncării
                     umbra_linger_timer = 15
                     umbra_waypoint     = eaten_pos
@@ -1463,6 +1524,26 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
         # Exemplu: ep=100, ε = 0.4 × 0.999^100 ≈ 0.361
         pred_epsilon = max(PRED_EPSILON_MIN, pred_epsilon * PRED_EPSILON_DECAY)
 
+        # Rând în jurnal (flush imediat — rămâne valid și la închiderea ferestrei)
+        n_turns = max(engine.turn, 1)
+        log_writer.writerow({
+            "episode": ep, "outcome": last_info, "turns": engine.turn,
+            "prey_reward": round(ep_prey_r, 3), "pred_reward": round(ep_pred_r, 3),
+            "pred_epsilon": round(pred_epsilon, 4),
+            "grass_eaten": grass_eaten,
+            "dist_start": round(dist_start, 2), "dist_min": round(dist_min, 2),
+            "dist_end": round(float(np.linalg.norm(engine.prey.pos - engine.predator.pos)), 2),
+            "prey_path": round(prey_path, 1), "pred_path": round(pred_path, 1),
+            "prey_alt_mean": round(prey_alt_sum / n_turns, 3),
+            "pred_alt_mean": round(pred_alt_sum / n_turns, 3),
+            "pred_alt_max": round(pred_alt_max, 3),
+            "prey_dW_in": round(float(np.linalg.norm(prey_policy.net.W_in - prey_W0)), 5),
+            "pred_dW_in": round(float(np.linalg.norm(pred_policy.net.W_in - pred_W0)), 5),
+            "prey_W_in_norm": round(float(np.linalg.norm(prey_policy.net.W_in)), 4),
+            "pred_W_in_norm": round(float(np.linalg.norm(pred_policy.net.W_in)), 4),
+        })
+        log_file.flush()
+
         # Statistici la fiecare 50 episoade
         if ep % 50 == 0:
             rate = captures / ep * 100
@@ -1477,6 +1558,7 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
 
     if not headless:
         pygame.quit()
+    log_file.close()
 
     print(f"\nFinal: {captures} capturi / {n_episodes} episoade "
           f"({captures/n_episodes*100:.1f}%)")
