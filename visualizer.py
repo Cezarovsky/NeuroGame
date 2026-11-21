@@ -203,9 +203,11 @@ HILL_HEIGHT = (1.5, 4.0)   # altitudinea vârfului
 HILL_SIGMA  = (5.0, 10.0)  # lățimea dealului — mai late decât în demo, pe măsura arenei
 SEED    = None   # None = seed nou la fiecare rulare (afișat); --seed N pentru reproductibilitate
 
-CHECKPOINT_FILE = Path("checkpoints/snn_teren.pkl")  # checkpoint persistent între rulări
+CHECKPOINT_DIR = Path("checkpoints")
+# Un checkpoint per rulare: checkpoints/run_<data>_seed<N>.pkl (același nume ca jurnalul).
+# Două rulări simultane nu-și mai suprascriu creierele. Un checkpoint încărcat la
+# resume nu se modifică niciodată — rularea nouă scrie în fișierul ei.
 LOG_DIR = Path("experiments/logs")   # un CSV per rulare (rând per episod) + JSON cu lumea
-# snn_checkpoint.pkl = creierul antrenat pe arena 30×30 fără teren — nu se suprascrie
 
 
 # ==================================================================
@@ -743,9 +745,9 @@ class Renderer:
 # FUNCȚIA PRINCIPALĂ run()
 # ==================================================================
 
-def save_checkpoint(prey_net, pred_net, episode_history, pred_epsilon, ep, captures, timeouts):
+def save_checkpoint(path: Path, prey_net, pred_net, episode_history, pred_epsilon, ep, captures, timeouts):
     """Salvează starea completă a simulării pe disc."""
-    CHECKPOINT_FILE.parent.mkdir(exist_ok=True)
+    path.parent.mkdir(exist_ok=True)
     data = {
         "prey_W_in":       prey_net.W_in.copy(),
         "prey_W_rec":      prey_net.W_rec.copy(),
@@ -757,26 +759,32 @@ def save_checkpoint(prey_net, pred_net, episode_history, pred_epsilon, ep, captu
         "captures":        captures,
         "timeouts":        timeouts,
     }
-    with open(CHECKPOINT_FILE, "wb") as f:
+    with open(path, "wb") as f:
         pickle.dump(data, f)
-    print(f"  [checkpoint salvat: ep {ep}]")
+    print(f"  [checkpoint salvat: ep {ep} → {path}]")
 
 
-def load_checkpoint(prey_net, pred_net):
+def latest_checkpoint() -> Path | None:
+    """Cel mai recent checkpoint de rulare (checkpoints/run_*.pkl), sau None."""
+    runs = list(CHECKPOINT_DIR.glob("run_*.pkl"))
+    return max(runs, key=lambda q: q.stat().st_mtime) if runs else None
+
+
+def load_checkpoint(path: Path | None, prey_net, pred_net):
     """
     Încarcă checkpoint dacă există. Returnează dict cu starea sau None.
-    Restaurează W_in și W_rec direct în rețele.
+    Restaurează W_in și W_rec direct în rețele. Fișierul sursă nu se modifică.
     """
-    if not CHECKPOINT_FILE.exists():
+    if path is None or not path.exists():
         return None
-    with open(CHECKPOINT_FILE, "rb") as f:
+    with open(path, "rb") as f:
         data = pickle.load(f)
     prey_net.W_in[:]  = data["prey_W_in"]
     prey_net.W_rec[:] = data["prey_W_rec"]
     pred_net.W_in[:]  = data["pred_W_in"]
     pred_net.W_rec[:] = data["pred_W_rec"]
     ep = data["last_episode"]
-    print(f"  [checkpoint încărcat: reluăm de la ep {ep + 1}]")
+    print(f"  [checkpoint încărcat: {path} — reluăm de la ep {ep + 1}]")
     return data
 
 
@@ -793,18 +801,19 @@ LOG_FIELDS = [
 ]
 
 
-def open_run_log(seed: int, arena: Arena, terrain: Terrain):
+def open_run_log(stem: str, seed: int, arena: Arena, terrain: Terrain,
+                 ckpt_path: Path, resumed_from: Path | None):
     """
     Deschide jurnalul rulării: CSV cu un rând per episod + JSON cu lumea
     (seed, dealuri, capcane), ca o rulare să poată fi reconstruită și analizată.
     Rândurile se scriu cu flush imediat — jurnalul rămâne valid și dacă închizi fereastra.
     """
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    stem = f"run_{datetime.now():%Y%m%d_%H%M%S}_seed{seed}"
     world = {
         "seed": seed, "arena": [arena.width, arena.height],
         "hills": terrain.hills, "traps": arena.traps,
-        "checkpoint": str(CHECKPOINT_FILE),
+        "checkpoint": str(ckpt_path),
+        "resumed_from": str(resumed_from) if resumed_from else None,
     }
     (LOG_DIR / f"{stem}.json").write_text(json.dumps(world, indent=2))
     f = open(LOG_DIR / f"{stem}.csv", "w", newline="")
@@ -817,7 +826,7 @@ def open_run_log(seed: int, arena: Arena, terrain: Terrain):
 
 def run(n_episodes: int = 500, seed: int | None = SEED,
         headless: bool = False, speed: int = 1,
-        n_traps: int = N_TRAPS, resume: bool = True):
+        n_traps: int = N_TRAPS, resume_from: Path | None = None):
     """
     Inițializează și rulează întreaga simulare.
 
@@ -856,7 +865,11 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
     pred_policy = NeuroPolicy(pred_net, RSTDPController(pred_net), seed=seed + 3)
 
     # ── Checkpoint resume ─────────────────────────────────────────
-    _ckpt = load_checkpoint(prey_net, pred_net) if resume else None
+    _ckpt = load_checkpoint(resume_from, prey_net, pred_net)
+    if _ckpt is None:
+        resume_from = None
+    run_stem  = f"run_{datetime.now():%Y%m%d_%H%M%S}_seed{seed}"
+    ckpt_path = CHECKPOINT_DIR / f"{run_stem}.pkl"
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # INIȚIALIZARE PYGAME
@@ -1226,7 +1239,7 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
     if not headless:
         rend.set_terrain(terrain)
 
-    log_file, log_writer = open_run_log(seed, arena, terrain)
+    log_file, log_writer = open_run_log(run_stem, seed, arena, terrain, ckpt_path, resume_from)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # PLATEAU DETECTOR — monitorizare consolidare SNN
@@ -1553,7 +1566,7 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
         # Verificare platou + checkpoint la fiecare 100 episoade
         if ep % PLATEAU_WINDOW == 0:
             _check_plateau(ep)
-            save_checkpoint(prey_policy.net, pred_policy.net,
+            save_checkpoint(ckpt_path, prey_policy.net, pred_policy.net,
                             episode_history, pred_epsilon, ep, captures, timeouts)
 
     if not headless:
@@ -1579,6 +1592,8 @@ def parse_args():
                    help="training fără fereastră Pygame")
     p.add_argument("--no-resume", action="store_true",
                    help="ignoră checkpoint, pornește de la zero")
+    p.add_argument("--resume-from", type=Path, default=None,
+                   help="checkpoint anume (implicit: cel mai recent checkpoints/run_*.pkl)")
     return p.parse_args()
 
 
@@ -1590,5 +1605,5 @@ if __name__ == "__main__":
         headless=args.headless,
         speed=args.speed,
         n_traps=args.traps,
-        resume=not args.no_resume,
+        resume_from=None if args.no_resume else (args.resume_from or latest_checkpoint()),
     )
