@@ -123,6 +123,10 @@ class GameEngine:
             return True
         return self.terrain.can_see(observer, target, base)
 
+    def _slope(self, pos: np.ndarray):
+        """Inelul de pantă pentru SNN; None fără teren (encoding pune plat)."""
+        return self.terrain.slope_ring(pos) if self.terrain is not None else None
+
     def pred_sees_prey(self) -> bool:
         return self.sees(self.predator.pos, self.prey.pos, PRED_VISION)
 
@@ -138,6 +142,7 @@ class GameEngine:
             "self_pos": self.prey.pos.copy(),
             "opponent_pos": self.predator.pos.copy(),
             "opponent_visible": self.prey_sees_pred(),
+            "slope_ring": self._slope(self.prey.pos),
             "stamina": self.prey.stamina,
             "stamina_max": 30.0,
             "turn": self.turn,
@@ -153,6 +158,7 @@ class GameEngine:
             "self_pos": self.predator.pos.copy(),
             "opponent_pos": self.prey.pos.copy(),
             "opponent_visible": self.pred_sees_prey(),
+            "slope_ring": self._slope(self.predator.pos),
             "intercept_pt": intercept,
             "stamina": self.predator.stamina,
             "stamina_max": PRED_STAMINA_MAX,

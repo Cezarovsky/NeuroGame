@@ -149,6 +149,9 @@ C_CONTOUR_MAJOR = (140, 150, 170)   # izolinie principală (fiecare a 4-a)
 CORE_R       = 1.5   # sub această distanță → Fenrir capturează Umbra
 RADIATIVE_R  = 5.0   # sub această distanță → L0 activează urmărirea activă
 LAST_SEEN_TURNS = 20 # cât timp Fenrir urmărește ultimul loc unde a văzut-o Umbra
+SEARCH_BY_SNN   = False  # True = SNN caută singur (experimental: se lipește de pereți, vezi jurnal 21 nov.)
+DETECT_REWARD   = 2.0   # dopamina „am găsit prada”: Fenrir o vede după ce n-o vedea
+EDGE_ZONE       = 5.0   # jurnal: „lângă perete” = mai aproape de 5u de margine
 CONVECTION_R = 10.0  # sub această distanță → L0 cedează controlul SNN-ului pentru Umbra
 
 # ─── Parametri iarbă ──────────────────────────────────────────────
@@ -804,6 +807,10 @@ def load_checkpoint(path: Path | None, prey_net, pred_net):
         return None
     with open(path, "rb") as f:
         data = pickle.load(f)
+    if data["prey_W_in"].shape != prey_net.W_in.shape:
+        print(f"  [checkpoint {path} incompatibil: W_in {data['prey_W_in'].shape} ≠ "
+              f"{prey_net.W_in.shape} — alt creier (alte intrări), pornim de la zero]")
+        return None
     prey_net.W_in[:]  = data["prey_W_in"]
     prey_net.W_rec[:] = data["prey_W_rec"]
     pred_net.W_in[:]  = data["pred_W_in"]
@@ -825,6 +832,9 @@ LOG_FIELDS = [
     "prey_W_in_norm", "pred_W_in_norm",
     "pred_sees_pct", "prey_sees_pct",                # % din tururi în care își vede oponentul
     "pred_stamina_mean", "pred_stamina_min",         # oboseala lupului
+    "pred_detections",                               # de câte ori a găsit-o (nevăzută → văzută)
+    "pred_edge_pct",                                 # % tururi lângă pereți (< EDGE_ZONE)
+    "pred_snn_pct", "prey_snn_pct",                  # % din tururi decise de SNN (nu de L0)
 ]
 
 
@@ -1047,6 +1057,11 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
             if float(np.linalg.norm(pos - fenrir_last_seen)) > 1.5:
                 return _action_toward(pos, fenrir_last_seen, noise=2)
             fenrir_last_seen = None
+
+        # Căutare: SNN decide unde caută (simte panta, stamina, pereții).
+        # Recompensa de detecție îi spune ce căutare a funcționat.
+        if SEARCH_BY_SNN:
+            return pred_policy(state_dict)
 
         # Patrol: waypoint nou dacă necesar
         if fenrir_waypoint is None or fenrir_waypoint_life <= 0:
@@ -1464,6 +1479,10 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
         prey_path = pred_path = 0.0
         prey_alt_sum = pred_alt_sum = pred_alt_max = 0.0
         pred_sees = prey_sees = 0
+        pred_saw = engine.pred_sees_prey()   # vizibilitatea din turul anterior (pentru detecție)
+        pred_detections = 0
+        prey_snn_turns = pred_snn_turns = 0
+        pred_edge = 0
         pred_stamina_sum = 0.0
         pred_stamina_min = engine.predator.stamina
         prey_W0 = prey_policy.net.W_in.copy()
@@ -1504,7 +1523,12 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
                 #   5. Verifică captură (dist < CORE_R) și capcane
                 #   6. Returnează EpisodeResult cu done, info, pozițiile noi
                 prey_prev, pred_prev = engine.prey.pos.copy(), engine.predator.pos.copy()
+                prey_calls0, pred_calls0 = prey_policy.n_calls, pred_policy.n_calls
                 result = engine.step()
+                prey_acted = prey_policy.n_calls > prey_calls0   # SNN-ul a decis în acest tur
+                pred_acted = pred_policy.n_calls > pred_calls0
+                prey_snn_turns += prey_acted
+                pred_snn_turns += pred_acted
 
                 # Jurnal: drum parcurs, distanță minimă, altitudini
                 prey_path += float(np.linalg.norm(engine.prey.pos - prey_prev))
@@ -1514,8 +1538,14 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
                 pred_alt = terrain.altitude(*engine.predator.pos)
                 pred_alt_sum += pred_alt
                 pred_alt_max = max(pred_alt_max, pred_alt)
-                pred_sees += engine.pred_sees_prey()
+                pred_sees_now = engine.pred_sees_prey()
+                detected = pred_sees_now and not pred_saw     # tocmai a găsit-o
+                pred_saw = pred_sees_now
+                pred_sees += pred_sees_now
+                pred_detections += detected
                 prey_sees += engine.prey_sees_pred()
+                px_, py_ = engine.predator.pos
+                pred_edge += min(px_, py_, arena.width - px_, arena.height - py_) < EDGE_ZONE
                 pred_stamina_sum += engine.predator.stamina
                 pred_stamina_min = min(pred_stamina_min, engine.predator.stamina)
 
@@ -1541,13 +1571,19 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
                 # Adăugăm motivația de iarbă la reward-ul Umbrei
                 # grass_reward = 0.0 tipic, 0.05/0.3 aproape, 5.0 la mâncat
                 prey_r += grass_reward
+                if detected:
+                    pred_r += DETECT_REWARD   # „am găsit-o” — leagă căutarea de succes imediat
 
                 # apply_reward(): transmite reward-ul la RSTDPController
                 # RSTDPController aplică regula STDP scalată cu reward-ul:
                 #   ΔW = η × reward × (pre_trace × post_spike - post_trace × pre_spike)
                 # Greutățile W_in și W_rec se modifică după fiecare turn.
-                prey_policy.apply_reward(prey_r)
-                pred_policy.apply_reward(pred_r)
+                # DOAR dacă SNN-ul a decis în acest tur: altfel fereastra conține
+                # decizii vechi, iar rețeaua ar fi lăudată/pedepsită pentru mișcări L0.
+                if prey_acted:
+                    prey_policy.apply_reward(prey_r)
+                if pred_acted:
+                    pred_policy.apply_reward(pred_r)
 
                 ep_prey_r += prey_r
                 ep_pred_r += pred_r
@@ -1617,6 +1653,10 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
             "prey_sees_pct": round(prey_sees / n_turns * 100, 1),
             "pred_stamina_mean": round(pred_stamina_sum / n_turns, 2),
             "pred_stamina_min": round(pred_stamina_min, 2),
+            "pred_detections": pred_detections,
+            "pred_edge_pct": round(pred_edge / n_turns * 100, 1),
+            "pred_snn_pct": round(pred_snn_turns / n_turns * 100, 1),
+            "prey_snn_pct": round(prey_snn_turns / n_turns * 100, 1),
         })
         log_file.flush()
 

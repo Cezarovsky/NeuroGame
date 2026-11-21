@@ -1,11 +1,13 @@
 """
-Encoding — state dict → spike rates (73 neuroni).
+Encoding — state dict → spike rates (105 neuroni).
 
 Structura vectorului de rates:
   [0:32]   — inel oponent: rata ∝ 1/distanță², pe bucket unghiular spre oponent
+             (zero când oponentul e ascuns de ceață)
   [32:64]  — inel pereți: rata ∝ 1/distanță per direcție (N_WALL_DIRECTIONS raze)
   [64]     — stamina ratio [0, 1]
   [65:73]  — inel iarbă: 8 neuroni direcționali spre cel mai apropiat patch
+  [73:105] — inel pantă: >0.5 = urcă în direcția aia, <0.5 = coboară
 
 Rates sunt normalize în [0, 1] — LAVA spike generator le transformă în
 frecvențe de spike în encoding.py → network.py.
@@ -23,7 +25,9 @@ N_OPPONENT_NEURONS = 32      # inel unghiular pentru oponent
 N_WALL_NEURONS = N_WALL_DIRECTIONS  # == 32
 N_STAMINA_NEURONS = 1
 N_GRASS_NEURONS = 8          # inel direcțional spre cel mai apropiat patch de iarbă
-N_INPUT = N_OPPONENT_NEURONS + N_WALL_NEURONS + N_STAMINA_NEURONS + N_GRASS_NEURONS  # = 73
+N_SLOPE_NEURONS = 32         # inel de pantă (terrain.slope_ring): 0.5 = plat
+N_INPUT = (N_OPPONENT_NEURONS + N_WALL_NEURONS + N_STAMINA_NEURONS
+           + N_GRASS_NEURONS + N_SLOPE_NEURONS)  # = 105
 
 # Parametri encoding oponent
 DIST_MIN = 0.5               # distanță minimă (evităm div/0)
@@ -114,12 +118,13 @@ def _grass_ring(self_pos: np.ndarray,
 def encode_state(state_dict: dict) -> np.ndarray:
     """
     Transformă state_dict (primit din engine.py) în
-    vectorul de rates shape (N_INPUT,) = (73,).
+    vectorul de rates shape (N_INPUT,) = (105,).
 
     state_dict conține:
       self_pos, opponent_pos, stamina, stamina_max, arena  (obligatoriu)
       grass_patches: list[(x, y)] — opțional, patch-uri de iarbă active
       opponent_visible: bool — opțional (implicit True); False = inel oponent zero
+      slope_ring: np.ndarray (32,) — opțional, panta pe direcții (implicit plat)
     """
     self_pos     = state_dict["self_pos"]
     opponent_pos = state_dict["opponent_pos"]
@@ -136,8 +141,12 @@ def encode_state(state_dict: dict) -> np.ndarray:
     wall_ring    = _wall_ring(self_pos, arena)                      # (32,)
     stamina_rate = np.array([stamina / max(stamina_max, 1e-9)])     # (1,)
     grass_ring   = _grass_ring(self_pos, grass)                     # (8,)
+    # Panta sub picioare; fără teren = plat peste tot
+    slope_ring   = state_dict.get("slope_ring")
+    if slope_ring is None:
+        slope_ring = np.full(N_SLOPE_NEURONS, 0.5)                  # (32,)
 
-    return np.concatenate([opp_ring, wall_ring, stamina_rate, grass_ring])  # (73,)
+    return np.concatenate([opp_ring, wall_ring, stamina_rate, grass_ring, slope_ring])  # (105,)
 
 
 def rates_to_spikes(rates: np.ndarray, n_timesteps: int,

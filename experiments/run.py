@@ -55,9 +55,11 @@ class NeuroPolicy:
         self.n_timesteps = n_timesteps
         self.rng = np.random.default_rng(seed)
         self._last_traces: dict | None = None
+        self.n_calls = 0   # câte decizii a luat rețeaua (nu L0) — pentru reward doar pe deciziile ei
 
     def __call__(self, state_dict: dict) -> int:
         """Apelat de GameEngine per turn."""
+        self.n_calls += 1
         rates = encode_state(state_dict)                          # (65,)
         spikes_out, traces = self.net.run(rates, self.n_timesteps,
                                          rng=self.rng)            # (T, 32)

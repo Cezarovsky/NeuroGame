@@ -26,7 +26,7 @@ V_RESET = 0.0           # potential după spike
 RECURRENT_SPARSITY = 0.20   # fracție conexiuni nenule în W_rec
 
 # Dimensiuni rețea
-N_INPUT = 73
+from neuromorphic.encoding import N_INPUT   # sursa unică: 105 (cu inelul de pantă)
 N_HIDDEN = 256
 N_OUTPUT = 32
 
