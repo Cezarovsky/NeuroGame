@@ -88,6 +88,8 @@ from neuromorphic.network import NeuroNet
 from neuromorphic.rstdp import RSTDPController
 from experiments.run import NeuroPolicy, random_spawn
 from game.terrain import Terrain, CONTOUR_STEP
+from game.engine import PRED_VISION
+from game.agents import PRED_STAMINA_MAX
 
 
 # ==================================================================
@@ -146,6 +148,7 @@ C_CONTOUR_MAJOR = (140, 150, 170)   # izolinie principală (fiecare a 4-a)
 # indiferent dacă câmpul e mic sau mare — senzorul e fix, nu contextual.
 CORE_R       = 1.5   # sub această distanță → Fenrir capturează Umbra
 RADIATIVE_R  = 5.0   # sub această distanță → L0 activează urmărirea activă
+LAST_SEEN_TURNS = 20 # cât timp Fenrir urmărește ultimul loc unde a văzut-o Umbra
 CONVECTION_R = 10.0  # sub această distanță → L0 cedează controlul SNN-ului pentru Umbra
 
 # ─── Parametri iarbă ──────────────────────────────────────────────
@@ -184,7 +187,11 @@ TRAP_SIZES = [UMBRA_R, UMBRA_R * 1.5, UMBRA_R * 1.5]
 
 # ─── Epsilon-greedy Fenrir ────────────────────────────────────────
 # Epsilon = probabilitatea de a alege o acțiune RANDOM în loc de politica L0/SNN.
-# Scade exponențial per episod: ε_nou = max(MIN, ε_vechi × DECAY)
+# Scade exponențial per episod: ε_nou = max(MIN, ε_vechi × DECAY)CHECKPOINT_DIR = Path("checkpoints")
+# Un checkpoint per rulare: checkpoints/run_<data>_seed<N>.pkl (același nume ca jurnalul).
+# Două rulări simultane nu-și mai suprascriu creierele. Un checkpoint încărcat la
+# resume nu se modifică niciodată — rularea nouă scrie în fișierul ei.
+LOG_DIR = Path("experiments/logs")   # un CSV per rulare (rând per episod) + JSON cu lumea
 #
 # La ep 0:    ε = 0.40  → 40% random, 60% politică
 # La ep 500:  ε ≈ 0.40 × 0.999^500 ≈ 0.242
@@ -691,6 +698,24 @@ class Renderer:
         pygame.draw.circle(self.surf, color,          (px, py), radius_px)
         pygame.draw.circle(self.surf, (255, 255, 255),(px, py), radius_px, 1)
 
+    def draw_vision(self, pos, radius_units: float, sees_target: bool):
+        """
+        Raza de vedere a lui Fenrir (crește cu altitudinea). Cercul e doar raza —
+        dealurile pot ascunde ce e înăuntru. Galben = o vede pe Umbra, gri = n-o vede.
+        """
+        px, py = self.cm.to_px(pos[0], pos[1])
+        color = (255, 220, 80) if sees_target else (120, 130, 150)
+        pygame.draw.circle(self.surf, color, (px, py), self.cm.scale(radius_units), 1)
+
+    def draw_stamina(self, pos, frac: float):
+        """Bară de stamina deasupra agentului: verde → roșu pe măsură ce obosește."""
+        px, py = self.cm.to_px(pos[0], pos[1])
+        w, h = 24, 4
+        x, y = px - w // 2, py - 20
+        pygame.draw.rect(self.surf, (40, 40, 50), (x, y, w, h))
+        color = (int(220 * (1 - frac)), int(200 * frac), 60)
+        pygame.draw.rect(self.surf, color, (x, y, max(1, int(w * frac)), h))
+
     def draw_hud(self, episode: int, turn: int, captures: int, timeouts: int,
                  prey_r: float, pred_r: float, last_info: str):
         """
@@ -798,6 +823,8 @@ LOG_FIELDS = [
     "prey_alt_mean", "pred_alt_mean", "pred_alt_max",  # cât stă sus (relevant din etapa 2)
     "prey_dW_in", "pred_dW_in",                      # cât a învățat în episod (‖ΔW_in‖)
     "prey_W_in_norm", "pred_W_in_norm",
+    "pred_sees_pct", "prey_sees_pct",                # % din tururi în care își vede oponentul
+    "pred_stamina_mean", "pred_stamina_min",         # oboseala lupului
 ]
 
 
@@ -899,6 +926,8 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
     # State Fenrir L0:
     fenrir_waypoint      = None  # destinația curentă (np.ndarray [x,y] sau None)
     fenrir_waypoint_life = 0     # câte turnuri mai merge pe acest waypoint
+    fenrir_last_seen     = None  # ultima poziție văzută a Umbrei (ceață: memorie scurtă)
+    fenrir_last_seen_life = 0    # câte turnuri mai crede în ea
 
     # State Umbra L0:
     umbra_waypoint       = None  # destinația curentă de foraging
@@ -993,16 +1022,31 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
         (Python: fără nonlocal, variabila ar fi locală și modificările s-ar pierde)
         """
         nonlocal fenrir_waypoint, fenrir_waypoint_life, pred_epsilon
+        nonlocal fenrir_last_seen, fenrir_last_seen_life
 
-        pos  = state_dict["self_pos"]
-        opp  = state_dict["opponent_pos"]
-        dist = float(np.linalg.norm(pos - opp))
+        pos     = state_dict["self_pos"]
+        opp     = state_dict["opponent_pos"]
+        visible = state_dict.get("opponent_visible", True)
+        dist    = float(np.linalg.norm(pos - opp))
 
-        if dist < RADIATIVE_R:
+        if visible and dist < RADIATIVE_R:
             # Umbra e aproape — SNN decide urmărirea
             if l0_rng.random() < 0.1:
                 return int(l0_rng.integers(0, 32))
             return pred_policy(state_dict)
+
+        # Ceață: o vede de departe → instinct de goană spre punctul de intercept
+        if visible:
+            fenrir_last_seen      = opp.copy()
+            fenrir_last_seen_life = LAST_SEEN_TURNS
+            return _action_toward(pos, state_dict["intercept_pt"], noise=1)
+
+        # A pierdut-o din vedere → merge spre ultimul loc unde a văzut-o
+        if fenrir_last_seen is not None and fenrir_last_seen_life > 0:
+            fenrir_last_seen_life -= 1
+            if float(np.linalg.norm(pos - fenrir_last_seen)) > 1.5:
+                return _action_toward(pos, fenrir_last_seen, noise=2)
+            fenrir_last_seen = None
 
         # Patrol: waypoint nou dacă necesar
         if fenrir_waypoint is None or fenrir_waypoint_life <= 0:
@@ -1093,7 +1137,8 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
         dist = float(np.linalg.norm(pos - opp))
 
         # ── 1. PERICOL ────────────────────────────────────────────
-        if dist < CONVECTION_R:
+        # Cu ceață: fuge doar de ce vede (un lup ascuns după deal nu sperie)
+        if state_dict.get("opponent_visible", True) and dist < CONVECTION_R:
             return prey_policy(state_dict)
 
         # ── 2. LINGER ─────────────────────────────────────────────
@@ -1387,6 +1432,7 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
 
         grass_mgr.reset()        # iarbă nouă în poziții noi pentru fiecare episod
         umbra_linger_timer = 0   # resetăm linger-ul (Umbra nu a mâncat la start)
+        fenrir_last_seen   = None   # memoria scurtă nu trece dintr-un episod în altul
         umbra_linger_wp    = None
         pred_pos_hist.clear()
 
@@ -1405,6 +1451,7 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
             arena=arena, prey=prey, predator=pred,
             prey_policy=prey_policy_l0,   # L0 cu grass sensing + apel intern SNN
             pred_policy=pred_policy_eps,  # epsilon-greedy wrapper peste L0
+            terrain=terrain,              # ceață + cost de urcuș
         )
 
         ep_prey_r = 0.0   # acumulator reward Umbra (resetat per episod)
@@ -1416,6 +1463,9 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
         grass_eaten  = 0
         prey_path = pred_path = 0.0
         prey_alt_sum = pred_alt_sum = pred_alt_max = 0.0
+        pred_sees = prey_sees = 0
+        pred_stamina_sum = 0.0
+        pred_stamina_min = engine.predator.stamina
         prey_W0 = prey_policy.net.W_in.copy()
         pred_W0 = pred_policy.net.W_in.copy()
 
@@ -1464,6 +1514,10 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
                 pred_alt = terrain.altitude(*engine.predator.pos)
                 pred_alt_sum += pred_alt
                 pred_alt_max = max(pred_alt_max, pred_alt)
+                pred_sees += engine.pred_sees_prey()
+                prey_sees += engine.prey_sees_pred()
+                pred_stamina_sum += engine.predator.stamina
+                pred_stamina_min = min(pred_stamina_min, engine.predator.stamina)
 
                 # Update iarbă DUPĂ mișcarea agenților
                 # eaten_pos ≠ None → Umbra tocmai a terminat de mâncat un patch (după GRASS_EAT_TURNS turnuri)
@@ -1505,7 +1559,12 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
                 rend.draw_zones(engine.predator.pos)                 # 3. zone radiant
                 rend.draw_grass(grass_mgr.patches)                   # 4. iarbă
                 rend.draw_agent(engine.prey.pos,     C_PREY, 10)     # 5. Umbra
+                rend.draw_vision(engine.predator.pos,                # 6a. ce vede Fenrir
+                                 terrain.vision_radius(engine.predator.pos, PRED_VISION),
+                                 engine.pred_sees_prey())
                 rend.draw_agent(engine.predator.pos, C_PRED, 12)     # 6. Fenrir
+                rend.draw_stamina(engine.predator.pos,
+                                  engine.predator.stamina / PRED_STAMINA_MAX)
                 rend.draw_hud(ep, engine.turn, captures, timeouts,
                               ep_prey_r, ep_pred_r, "")              # 7. HUD
                 pygame.display.flip()   # schimbă buffer-ul → afișează frame-ul
@@ -1554,6 +1613,10 @@ def run(n_episodes: int = 500, seed: int | None = SEED,
             "pred_dW_in": round(float(np.linalg.norm(pred_policy.net.W_in - pred_W0)), 5),
             "prey_W_in_norm": round(float(np.linalg.norm(prey_policy.net.W_in)), 4),
             "pred_W_in_norm": round(float(np.linalg.norm(pred_policy.net.W_in)), 4),
+            "pred_sees_pct": round(pred_sees / n_turns * 100, 1),
+            "prey_sees_pct": round(prey_sees / n_turns * 100, 1),
+            "pred_stamina_mean": round(pred_stamina_sum / n_turns, 2),
+            "pred_stamina_min": round(pred_stamina_min, 2),
         })
         log_file.flush()
 

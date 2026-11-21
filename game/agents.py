@@ -64,24 +64,41 @@ class Prey:
         return candidates
 
     def apply_action(self, action_idx: int, predator_pos: np.ndarray,
-                     turn: int, arena) -> None:
-        """Mută agentul la candidatul acțiunii, clampat în arenă."""
+                     turn: int, arena, terrain=None) -> None:
+        """Mută agentul la candidatul acțiunii, clampat în arenă. Urcușul costă în plus."""
         candidates = self.action_positions(predator_pos, turn)
         new_pos = arena.clip_position(candidates[action_idx % N_ACTIONS])
         distance = float(np.linalg.norm(new_pos - self.pos))
+        climb = terrain.climb_cost(self.pos, new_pos) if terrain is not None else 0.0
         self.pos = new_pos
-        self.consume_stamina(distance)
+        self.consume_stamina(distance + climb)
         self.prev_action = action_idx
         self.maybe_regen(turn)
 
 
+PRED_STAMINA_MAX   = 30.0   # plafon stamina lup
+PRED_STAMINA_REGEN = 0.6    # regenerare per turn (pe plat se reface din mers)
+PRED_MIN_SPEED     = 0.4    # fracția de viteză a unui lup epuizat (stamina 0)
+
+
 class Predator:
-    """Prădătorul (lupul) — vrea să captureze prada."""
+    """
+    Prădătorul (lupul) — vrea să captureze prada.
+
+    Stamina: pe plat nu costă nimic, urcușul costă (terrain.climb_cost).
+    Viteza scade liniar cu oboseala: de la speed (plin) la PRED_MIN_SPEED × speed (gol).
+    Compromisul: dealul dă vedere, dar te lasă mai lent la coborâre spre pradă.
+    """
 
     def __init__(self, pos: np.ndarray, speed: float = 1.5):
         self.pos = np.array(pos, dtype=float)
         self.speed = float(speed)
+        self.stamina = PRED_STAMINA_MAX
         self.prev_action: int = 0
+
+    def current_speed(self) -> float:
+        frac = self.stamina / PRED_STAMINA_MAX
+        return self.speed * (PRED_MIN_SPEED + (1.0 - PRED_MIN_SPEED) * frac)
 
     # ------------------------------------------------------------------
     # Intercept (nu pursuit)
@@ -104,21 +121,24 @@ class Predator:
 
     def action_positions(self, intercept_pt: np.ndarray) -> np.ndarray:
         """
-        Returnează shape (N_ACTIONS, 2) — 360° uniform, raza = speed.
+        Returnează shape (N_ACTIONS, 2) — 360° uniform, raza = viteza curentă
+        (scade cu oboseala).
 
         Acțiunile aproape de direcția intercept primesc același tratament
         cu celelalte; rețeaua va fi recompensată să le aleagă (R-STDP).
         """
         angles = np.linspace(0.0, 2 * math.pi, N_ACTIONS, endpoint=False)
-        candidates = self.pos + self.speed * np.column_stack(
+        candidates = self.pos + self.current_speed() * np.column_stack(
             (np.cos(angles), np.sin(angles))
         )
         return candidates
 
     def apply_action(self, action_idx: int, intercept_pt: np.ndarray,
-                     arena) -> None:
-        """Mută predatorul la candidatul ales, clampat în arenă."""
+                     arena, terrain=None) -> None:
+        """Mută predatorul la candidatul ales, clampat în arenă. Plătește urcușul în stamina."""
         candidates = self.action_positions(intercept_pt)
         new_pos = arena.clip_position(candidates[action_idx % N_ACTIONS])
+        climb = terrain.climb_cost(self.pos, new_pos) if terrain is not None else 0.0
+        self.stamina = min(PRED_STAMINA_MAX, max(0.0, self.stamina - climb) + PRED_STAMINA_REGEN)
         self.pos = new_pos
         self.prev_action = action_idx

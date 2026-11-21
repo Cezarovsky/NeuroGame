@@ -119,6 +119,7 @@ def encode_state(state_dict: dict) -> np.ndarray:
     state_dict conține:
       self_pos, opponent_pos, stamina, stamina_max, arena  (obligatoriu)
       grass_patches: list[(x, y)] — opțional, patch-uri de iarbă active
+      opponent_visible: bool — opțional (implicit True); False = inel oponent zero
     """
     self_pos     = state_dict["self_pos"]
     opponent_pos = state_dict["opponent_pos"]
@@ -127,7 +128,11 @@ def encode_state(state_dict: dict) -> np.ndarray:
     stamina_max  = float(state_dict.get("stamina_max", 30.0))
     grass        = state_dict.get("grass_patches", [])
 
-    opp_ring     = _opponent_ring(self_pos, opponent_pos)           # (32,)
+    # Ceața războiului: oponentul nevăzut = inel tăcut (nu „știe” unde e)
+    if state_dict.get("opponent_visible", True):
+        opp_ring = _opponent_ring(self_pos, opponent_pos)           # (32,)
+    else:
+        opp_ring = np.zeros(N_OPPONENT_NEURONS)
     wall_ring    = _wall_ring(self_pos, arena)                      # (32,)
     stamina_rate = np.array([stamina / max(stamina_max, 1e-9)])     # (1,)
     grass_ring   = _grass_ring(self_pos, grass)                     # (8,)

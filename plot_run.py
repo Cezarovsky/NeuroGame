@@ -108,8 +108,19 @@ def render(path: Path, w: int) -> Path:
         ], None),
         ("Iarba mâncată de Umbra (patch-uri/episod)", [("iarbă", r("grass_eaten"), C_PREY, "")], None),
     ]
+    if "pred_sees_pct" in d:   # jurnale cu ceață + stamina lup
+        panels += [
+            ("Ceața: % din tururi în care își vede oponentul", [
+                ("Fenrir o vede", r("pred_sees_pct"), C_PRED, ""),
+                ("Umbra îl vede", r("prey_sees_pct"), C_PREY, ""),
+            ], 100.0),
+            ("Stamina lui Fenrir (max 30)", [
+                ("medie", r("pred_stamina_mean"), C_PRED, ""),
+                ("minimă", r("pred_stamina_min"), C_PRED, "d"),
+            ], 30.0),
+        ]
 
-    h = TOP + 3 * (PANEL_H + GAP)
+    h = TOP + (len(panels) + 1) // 2 * (PANEL_H + GAP)
     body = [f'<rect width="{W}" height="{h}" fill="{BG}"/>',
             f'<text x="{W / 2}" y="40" text-anchor="middle" font-size="15" font-weight="bold" fill="{TEXT}">'
             f'{escape(path.stem)}  |  {len(ep)} episoade  |  medie mobilă pe {w}</text>']

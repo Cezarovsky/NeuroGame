@@ -27,6 +27,7 @@ VISION_GAIN  = 2.0     # +unități de rază pentru fiecare unitate de altitudin
 LOS_STEP     = 0.25    # pasul de eșantionare pe linia de vedere
 SLOPE_PROBE  = 1.5     # cât de departe „simte” panta în fiecare direcție
 SLOPE_NORM   = 1.0     # diferența de altitudine care saturează un neuron
+CLIMB_COST   = 5.0     # stamina per unitate de altitudine urcată (vârf de 4 ≈ 20 stamina)
 
 
 class Terrain:
@@ -64,9 +65,9 @@ class Terrain:
 
     # ── vedere ──────────────────────────────────────────────────────────────
 
-    def vision_radius(self, pos: np.ndarray) -> float:
-        """Cine e sus vede mai departe."""
-        return BASE_VISION + VISION_GAIN * self.altitude(pos[0], pos[1])
+    def vision_radius(self, pos: np.ndarray, base: float = BASE_VISION) -> float:
+        """Cine e sus vede mai departe. `base` = raza pe teren plat (diferă pe specie)."""
+        return base + VISION_GAIN * self.altitude(pos[0], pos[1])
 
     def line_of_sight(self, p1: np.ndarray, p2: np.ndarray) -> bool:
         """True dacă din p1 se vede p2 (niciun deal nu iese deasupra razei)."""
@@ -82,9 +83,9 @@ class Terrain:
         ray = z1 + t * (z2 - z1)
         return bool(np.all(self.altitude(xs, ys) <= ray))
 
-    def can_see(self, observer: np.ndarray, target: np.ndarray) -> bool:
+    def can_see(self, observer: np.ndarray, target: np.ndarray, base: float = BASE_VISION) -> bool:
         """Ceața războiului: în rază ȘI cu linie de vedere liberă."""
-        if np.linalg.norm(target - observer) > self.vision_radius(observer):
+        if np.linalg.norm(target - observer) > self.vision_radius(observer, base):
             return False
         return self.line_of_sight(observer, target)
 
@@ -105,7 +106,7 @@ class Terrain:
     def climb_cost(self, p_from: np.ndarray, p_to: np.ndarray) -> float:
         """Cost suplimentar de stamina: doar urcușul costă, coborâșul nu."""
         dz = self.altitude(p_to[0], p_to[1]) - self.altitude(p_from[0], p_from[1])
-        return max(0.0, float(dz))
+        return CLIMB_COST * max(0.0, float(dz))
 
     def __repr__(self) -> str:
         return f"Terrain({self.width}x{self.height}, hills={len(self.hills)})"

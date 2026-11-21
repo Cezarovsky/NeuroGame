@@ -23,11 +23,16 @@ from typing import Callable, List, Optional, Tuple
 import numpy as np
 
 from game.arena import Arena
-from game.agents import Prey, Predator, N_ACTIONS
+from game.agents import Prey, Predator, N_ACTIONS, PRED_STAMINA_MAX
 
 VELOCITY_WINDOW = 4          # câte turnuri ținute pentru estimare viteză pradă
 CAPTURE_THRESHOLD = 1.5      # distanță (unități) la care se consideră captură
 MAX_TURNS = 500              # episod limitat pentru antrenament
+
+# Ceața războiului (doar cu teren): raza de vedere pe plat, crește cu altitudinea.
+# Iepurele e inferior: vede mai puțin decât lupul.
+PRED_VISION = 10.0
+PREY_VISION = 8.0
 
 PolicyFn = Callable[[dict], int]
 
@@ -72,8 +77,11 @@ class GameEngine:
         pred_policy: PolicyFn,
         capture_threshold: float = CAPTURE_THRESHOLD,
         max_turns: int = MAX_TURNS,
+        terrain=None,
     ):
         self.arena = arena
+        # terrain=None → arenă plată, vedere totală (comportamentul vechi)
+        self.terrain = terrain
         self.prey = prey
         self.predator = predator
         self.prey_policy = prey_policy
@@ -109,11 +117,27 @@ class GameEngine:
     # Construire state dict (intrare pentru policy functions)
     # ------------------------------------------------------------------
 
+    def sees(self, observer: np.ndarray, target: np.ndarray, base: float) -> bool:
+        """Fără teren: vede tot. Cu teren: rază după altitudine + linie de vedere."""
+        if self.terrain is None:
+            return True
+        return self.terrain.can_see(observer, target, base)
+
+    def pred_sees_prey(self) -> bool:
+        return self.sees(self.predator.pos, self.prey.pos, PRED_VISION)
+
+    def prey_sees_pred(self) -> bool:
+        return self.sees(self.prey.pos, self.predator.pos, PREY_VISION)
+
     def _prey_state(self) -> dict:
-        """State dict pentru prada — encoding.py îl transformă în spike train."""
+        """
+        State dict pentru prada — encoding.py îl transformă în spike train.
+        opponent_visible=False → opponent_pos nu trebuie folosit (ceață).
+        """
         return {
             "self_pos": self.prey.pos.copy(),
             "opponent_pos": self.predator.pos.copy(),
+            "opponent_visible": self.prey_sees_pred(),
             "stamina": self.prey.stamina,
             "stamina_max": 30.0,
             "turn": self.turn,
@@ -128,7 +152,10 @@ class GameEngine:
         return {
             "self_pos": self.predator.pos.copy(),
             "opponent_pos": self.prey.pos.copy(),
+            "opponent_visible": self.pred_sees_prey(),
             "intercept_pt": intercept,
+            "stamina": self.predator.stamina,
+            "stamina_max": PRED_STAMINA_MAX,
             "turn": self.turn,
             "arena": self.arena,
             "role": "predator",
@@ -166,6 +193,7 @@ class GameEngine:
             predator_pos=self.predator.pos,
             turn=self.turn,
             arena=self.arena,
+            terrain=self.terrain,
         )
         self._prey_history.append(self.prey.pos.copy())
 
@@ -173,7 +201,7 @@ class GameEngine:
         pred_state = self._pred_state()
         pred_action = self.pred_policy(pred_state)
         intercept_pt = pred_state["intercept_pt"]
-        self.predator.apply_action(pred_action, intercept_pt, arena=self.arena)
+        self.predator.apply_action(pred_action, intercept_pt, arena=self.arena, terrain=self.terrain)
 
         # 3. Verificare capcană (prey moare singur — segment-based pentru salturi mari)
         prev_prey_pos = self._prey_history[-2] if len(self._prey_history) >= 2 else self.prey.pos
@@ -251,6 +279,7 @@ class GameEngine:
         if pred_pos is not None:
             self.predator.pos = np.array(pred_pos, dtype=float)
         self.prey.stamina = 20.0
+        self.predator.stamina = PRED_STAMINA_MAX
         self.prey.prev_action = 0
         self.predator.prev_action = 0
         self._prey_history = deque(
